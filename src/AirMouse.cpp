@@ -535,6 +535,17 @@ void clearExitArm() {
     amExitArmed = false;
 }
 
+void closeAirMouseMenu() {
+    if (amSettingsChanged) {
+        saveAMSettings();
+        amSettingsChanged = false;
+    }
+    amInMenu = false;
+    clearExitArm();
+    releaseAllAMButtons();
+    refreshAMUI();
+}
+
 void exitAirMouse() {
     if (amSettingsChanged) {
         saveAMSettings();
@@ -559,6 +570,10 @@ bool handleExitGesture(const Keyboard_Class::KeysState& keyState, unsigned long 
     if (!delEdge) return false;
 
     if (amExitArmed && (now - amExitArmMillis) <= AM_EXIT_DOUBLE_TAP_MS) {
+        if (amInMenu) {
+            closeAirMouseMenu();
+            return true;
+        }
         exitAirMouse();
         return true;
     }
@@ -709,12 +724,7 @@ void handleSettingsMenu(unsigned long now) {
         amLastKeyPress = now;
     } else if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) || M5.BtnA.isPressed()) {
         if (amMenuIndex == AM_MENU_EXIT) {
-            if (amSettingsChanged) {
-                saveAMSettings();
-                amSettingsChanged = false;
-            }
-            amInMenu = false;
-            refreshAMUI();
+            closeAirMouseMenu();
         }
         amLastKeyPress = now;
     }
