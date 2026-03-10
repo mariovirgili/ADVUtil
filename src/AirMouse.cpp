@@ -234,7 +234,8 @@ void drawAMBackground() {
 void drawAMHeader(const char* title, const char* subtitle) {
     M5.Display.setTextSize(1);
     M5.Display.setTextColor(WHITE);
-    M5.Display.setCursor(12, 10);
+    const int titleX = (M5.Display.width() - (strlen(title) * 6)) / 2;
+    M5.Display.setCursor(titleX, 10);
     M5.Display.println(title);
     if (subtitle != nullptr && subtitle[0] != '\0') {
         M5.Display.setTextColor(M5.Display.color565(220, 245, 255));

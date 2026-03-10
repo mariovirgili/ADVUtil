@@ -50,17 +50,21 @@ void setupSD() {
 }
 
 void drawMenu() {
+    const char* menuTitle = "ADVUtil v0.4 - MENU";
+
     for (int i = 0; i < M5.Display.height(); i++) {
         M5.Display.drawGradientLine(0, i, M5.Display.width(), i, getGradientColor(i, M5.Display.height()), getGradientColor(i, M5.Display.height()));
     }
 
     M5.Display.setTextSize(2);
+    const int titleWidth = strlen(menuTitle) * 12;
+    const int titleX = (M5.Display.width() - titleWidth) / 2;
     M5.Display.setTextColor(BLACK);
-    M5.Display.setCursor(12, 12);
-    M5.Display.println("ADV OS - MENU");
+    M5.Display.setCursor(titleX + 2, 12);
+    M5.Display.println(menuTitle);
     M5.Display.setTextColor(WHITE);
-    M5.Display.setCursor(10, 10);
-    M5.Display.println("ADV OS - MENU");
+    M5.Display.setCursor(titleX, 10);
+    M5.Display.println(menuTitle);
 
     int startY = 50;
     int spacing = 40;
