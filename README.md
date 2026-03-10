@@ -64,4 +64,32 @@ Air Mouse settings are now saved persistently
 
 Thanks to u/Russian_man_ who pointed these out, especially the suggestion about axis inversion and customizable mouse buttons. Those were genuinely useful improvements.
 
+
+___________________________________
+V0.4 changelog:
+
+Added a new Bluetooth keyboard mode
+You can now press the top button (BtnG0) to switch between Air Mouse mode and Keyboard mode
+Air Mouse now uses a BLE combo HID setup, so mouse and keyboard features are integrated in the same Bluetooth device
+Exiting Air Mouse mode now requires pressing Del twice, to reduce accidental exits
+In Keyboard mode, Del works normally again as backspace
+Reworked the Air Mouse UI to better match the main menu style
+Cleaned up the main Air Mouse screen layout for better readability
+Added H for Help on the Air Mouse screen to show controls and key mappings
+Improved the Motion and Actions panels layout
+Air Mouse settings UI was restyled to feel more consistent with the rest of the app
+
+Current Air Mouse controls:
+BtnG0: switch between Mouse and Keyboard mode
+M: open Air Mouse settings
+C: calibrate IMU
+H: open help
+Del twice: exit Air Mouse mode
+; and .: mouse wheel
+, and /: horizontal scroll
+
+If you update from an older version, you may need to remove the old Bluetooth pairing and pair the Cardputer again, since the HID setup changed in this release.
+
+As always thanks to u/Russian_man_ who pointed these out
+
 If you test the new version, let me know how the new Air Mouse controls feel and whether the default button mappings make sense or should be changed.
