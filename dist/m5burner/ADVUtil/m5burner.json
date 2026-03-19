@@ -1,0 +1,16 @@
+{
+  "name": "ADVUtil",
+  "description": "Air Mouse BLE + GPS utility for M5Stack Cardputer.",
+  "keywords": "Cardputer, ESP32-S3, BLE, GPS, Air Mouse",
+  "author": "mariovirgili",
+  "repository": "https://github.com/mariovirgili/ADVUtil",
+  "firmware_category": {
+    "Cardputer": {
+      "path": "firmware",
+      "device": ["Cardputer"],
+      "default_baud": 1500000
+    }
+  },
+  "version": "0.4.0",
+  "framework": "Arduino"
+}

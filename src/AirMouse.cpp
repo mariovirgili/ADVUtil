@@ -22,7 +22,7 @@ float fractionX = 0.0f;
 float fractionY = 0.0f;
 float sensitivity = 0.15f;
 bool invertAxisX = false;
-bool invertAxisY = false;
+bool invertAxisY = true;
 
 enum AMBindingKey : uint8_t {
     AM_BIND_NONE = 0,
@@ -74,6 +74,10 @@ bool amLastKeyboardHintVisible = false;
 bool amShowMouseHelp = false;
 
 constexpr unsigned long AM_EXIT_DOUBLE_TAP_MS = 550;
+constexpr uint8_t AM_HID_RIGHT_ARROW = 0x4F;
+constexpr uint8_t AM_HID_LEFT_ARROW = 0x50;
+constexpr uint8_t AM_HID_DOWN_ARROW = 0x51;
+constexpr uint8_t AM_HID_UP_ARROW = 0x52;
 
 const char* getBindingLabel(AMBindingKey binding) {
     switch (binding) {
@@ -178,7 +182,7 @@ void applyConfigLine(const String& rawLine) {
 void loadAMSettings() {
     sensitivity = 0.15f;
     invertAxisX = false;
-    invertAxisY = false;
+    invertAxisY = true;
     leftClickBinding = AM_BIND_ENTER;
     rightClickBinding = AM_BIND_SPACE;
     middleClickBinding = AM_BIND_V;
@@ -273,6 +277,28 @@ String getModeText() {
     return amControlMode == AM_MODE_MOUSE ? "Mouse" : "Keyboard";
 }
 
+const char* getFnArrowLabel(char key) {
+    switch (key) {
+        case ';': return "Up";
+        case ',': return "Left";
+        case '.': return "Down";
+        case '/': return "Right";
+        default:  return nullptr;
+    }
+}
+
+uint8_t remapFnArrowKey(const Keyboard_Class::KeysState& keyState, uint8_t hidKey) {
+    if (!keyState.fn) return hidKey;
+
+    switch (hidKey) {
+        case 0x33: return AM_HID_UP_ARROW;
+        case 0x36: return AM_HID_LEFT_ARROW;
+        case 0x37: return AM_HID_DOWN_ARROW;
+        case 0x38: return AM_HID_RIGHT_ARROW;
+        default:   return hidKey;
+    }
+}
+
 String getPreviewText(const Keyboard_Class::KeysState& keyState) {
     if (keyState.hid_keys.empty() && keyState.modifiers == 0) return "Ready to type";
 
@@ -284,6 +310,13 @@ String getPreviewText(const Keyboard_Class::KeysState& keyState) {
     for (char c : keyState.word) {
         if (preview.length() >= 24) break;
         if (preview.length() > 0) preview += ' ';
+        if (keyState.fn) {
+            const char* arrowLabel = getFnArrowLabel(c);
+            if (arrowLabel != nullptr) {
+                preview += arrowLabel;
+                continue;
+            }
+        }
         if (c == ' ') preview += "Space";
         else preview += c;
     }
@@ -613,7 +646,7 @@ void handleKeyboardMode(const Keyboard_Class::KeysState& keyState) {
     size_t keyCount = 0;
 
     for (uint8_t hidKey : keyState.hid_keys) {
-        if (keyCount < 6) keys[keyCount++] = hidKey;
+        if (keyCount < 6) keys[keyCount++] = remapFnArrowKey(keyState, hidKey);
     }
 
     bleCombo.sendKeyboardReport(keyState.modifiers, keys, keyCount);
