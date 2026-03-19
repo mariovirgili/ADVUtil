@@ -68,17 +68,6 @@ Thanks to u/Russian_man_ who pointed these out, especially the suggestion about 
 
 
 ___________________________________
-V0.5 changelog:
-
-Added Macro Mode for Air Mouse and Keyboard overlays
-Hold BtnA for 2 seconds to enter or exit Macro Mode
-Press 1 to 0 to play one of the 10 saved macros
-Press R to record or replace a macro, then stop recording with backtick
-Press L to view the saved macros in a scrollable list
-Macro contents are saved on SD card and restored on startup
-
-
-___________________________________
 V0.4 changelog:
 
 Added a new Bluetooth keyboard mode
@@ -106,3 +95,26 @@ If you update from an older version, you may need to remove the old Bluetooth pa
 As always thanks to u/Russian_man_ who pointed these out
 
 If you test the new version, let me know how the new Air Mouse controls feel and whether the default button mappings make sense or should be changed.
+
+__________________________________
+
+V0.5 changelog:
+
+- Added Macro Mode for both Air Mouse and Keyboard mode
+- Hold BtnA for 2 seconds to enter or exit Macro Mode
+- Use keys 1 to 0 to play any of the 10 saved macro slots
+- Press R to record or replace a macro, with on-screen key preview while recording
+- Press ESC to stop and save a recording
+- Press L to open a scrollable list of saved macros
+- Macro slots are saved on SD card and restored on startup
+- Added a first-time keyboard layout setup screen, with the selected layout saved in `airmouse.cfg`
+- Added a keyboard layout selector inside the Air Mouse settings menu
+- Live keyboard mode and macro playback now follow the selected host keyboard layout
+- Added international keyboard layouts based on the official Arduino Keyboard layouts: US, IT, FR, DE, DA, ES, HU, PT-BR, PT-PT and SV
+- Added UK keyboard layout support as an extra selectable layout
+- Refined the macro UI, help boxes and first-time setup screens
+- Renamed the main menu entry to Air Mouse/Kbd
+
+Recommended after updating:
+
+- If you recorded macros on older builds, re-recording them is recommended for best compatibility with the new layout-aware macro system
