@@ -50,7 +50,7 @@ void setupSD() {
 }
 
 void drawMenu() {
-    const char* menuTitle = "ADVUtil v0.4 - MENU";
+    const char* menuTitle = "ADVUtil v0.5 - MENU";
 
     for (int i = 0; i < M5.Display.height(); i++) {
         M5.Display.drawGradientLine(0, i, M5.Display.width(), i, getGradientColor(i, M5.Display.height()), getGradientColor(i, M5.Display.height()));

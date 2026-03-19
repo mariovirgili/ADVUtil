@@ -4,6 +4,7 @@
 
 #include <M5Cardputer.h>
 #include <SD.h>
+#include <vector>
 
 // Import the shared SD/menu state from main.cpp.
 extern bool sdAvailable;
@@ -12,6 +13,7 @@ extern bool returnToMenu;
 BleComboHID bleCombo("Cardputer Mouse", "M5Stack", 100);
 
 const char* amConfigPath = "/ADVUtil/airmouse.cfg";
+const char* amMacroConfigPath = "/ADVUtil/airmouse_macros.cfg";
 bool amSettingsChanged = false;
 
 float gyroXOffset = 0.0f;
@@ -54,6 +56,24 @@ enum AMControlMode : uint8_t {
     AM_MODE_KEYBOARD
 };
 
+enum AMMacroView : uint8_t {
+    AM_MACRO_VIEW_HOME = 0,
+    AM_MACRO_VIEW_RECORD_SELECT,
+    AM_MACRO_VIEW_RECORDING,
+    AM_MACRO_VIEW_LIST,
+    AM_MACRO_VIEW_PLAYBACK
+};
+
+struct AMMacroStep {
+    uint8_t modifiers = 0;
+    uint8_t keys[6] = {0, 0, 0, 0, 0, 0};
+};
+
+struct AMMacroSlot {
+    String preview = "";
+    std::vector<AMMacroStep> steps;
+};
+
 AMBindingKey leftClickBinding = AM_BIND_ENTER;
 AMBindingKey rightClickBinding = AM_BIND_SPACE;
 AMBindingKey middleClickBinding = AM_BIND_V;
@@ -72,12 +92,35 @@ AMControlMode amControlMode = AM_MODE_MOUSE;
 String amLastKeyboardPreview = "";
 bool amLastKeyboardHintVisible = false;
 bool amShowMouseHelp = false;
+bool amMacroMode = false;
+bool amBtnALongHandled = false;
+int amMacroListScroll = 0;
+int amMacroSelectedSlot = -1;
+int amMacroPlaybackSlot = -1;
+size_t amMacroPlaybackIndex = 0;
+unsigned long amMacroPlaybackMillis = 0;
+unsigned long amMacroStatusUntil = 0;
+String amMacroStatusMessage = "";
+String amMacroRecordingPreview = "";
+bool amMacroRecordingTruncated = false;
+AMMacroView amMacroView = AM_MACRO_VIEW_HOME;
+AMMacroStep amMacroLastInputStep;
+bool amMacroHasLastInputStep = false;
+std::vector<AMMacroStep> amMacroRecordingSteps;
+AMMacroSlot amMacroSlots[10];
 
 constexpr unsigned long AM_EXIT_DOUBLE_TAP_MS = 550;
+constexpr unsigned long AM_MACRO_HOLD_MS = 2000;
+constexpr unsigned long AM_MACRO_STATUS_MS = 2000;
+constexpr unsigned long AM_MACRO_PLAYBACK_STEP_MS = 70;
+constexpr size_t AM_MACRO_SLOT_COUNT = 10;
+constexpr size_t AM_MACRO_MAX_STEPS = 120;
 constexpr uint8_t AM_HID_RIGHT_ARROW = 0x4F;
 constexpr uint8_t AM_HID_LEFT_ARROW = 0x50;
 constexpr uint8_t AM_HID_DOWN_ARROW = 0x51;
 constexpr uint8_t AM_HID_UP_ARROW = 0x52;
+
+void clearExitArm();
 
 const char* getBindingLabel(AMBindingKey binding) {
     switch (binding) {
@@ -137,6 +180,12 @@ void releaseAllAMButtons() {
 }
 
 void writeConfigLine(File& file, const char* key, const String& value) {
+    file.print(key);
+    file.print('=');
+    file.println(value);
+}
+
+void writeConfigLine(File& file, const String& key, const String& value) {
     file.print(key);
     file.print('=');
     file.println(value);
@@ -217,6 +266,231 @@ void saveAMSettings() {
         writeConfigLine(file, "forward_click", getBindingLabel(forwardClickBinding));
         file.close();
     }
+}
+
+const char* getMacroSlotLabel(int slot) {
+    static const char* labels[AM_MACRO_SLOT_COUNT] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"};
+    if (slot < 0 || slot >= static_cast<int>(AM_MACRO_SLOT_COUNT)) return "?";
+    return labels[slot];
+}
+
+int getMacroSlotIndex(char key) {
+    if (key >= '1' && key <= '9') return key - '1';
+    if (key == '0') return 9;
+    return -1;
+}
+
+bool isMacroSlotUsed(int slot) {
+    return slot >= 0
+        && slot < static_cast<int>(AM_MACRO_SLOT_COUNT)
+        && !amMacroSlots[slot].steps.empty();
+}
+
+int getUsedMacroCount() {
+    int used = 0;
+    for (size_t i = 0; i < AM_MACRO_SLOT_COUNT; ++i) {
+        if (isMacroSlotUsed(static_cast<int>(i))) ++used;
+    }
+    return used;
+}
+
+void clearMacroSlot(int slot) {
+    if (slot < 0 || slot >= static_cast<int>(AM_MACRO_SLOT_COUNT)) return;
+    amMacroSlots[slot].preview = "";
+    amMacroSlots[slot].steps.clear();
+}
+
+char toHexDigit(uint8_t value) {
+    return value < 10 ? static_cast<char>('0' + value) : static_cast<char>('A' + (value - 10));
+}
+
+int fromHexDigit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+String encodeHexText(const String& text) {
+    String encoded = "";
+    encoded.reserve(text.length() * 2);
+    for (size_t i = 0; i < text.length(); ++i) {
+        const uint8_t value = static_cast<uint8_t>(text.charAt(i));
+        encoded += toHexDigit((value >> 4) & 0x0F);
+        encoded += toHexDigit(value & 0x0F);
+    }
+    return encoded;
+}
+
+bool decodeHexByte(const String& text, int offset, uint8_t& value) {
+    if (offset < 0 || (offset + 1) >= text.length()) return false;
+    const int high = fromHexDigit(text.charAt(offset));
+    const int low = fromHexDigit(text.charAt(offset + 1));
+    if (high < 0 || low < 0) return false;
+    value = static_cast<uint8_t>((high << 4) | low);
+    return true;
+}
+
+String decodeHexText(const String& text) {
+    String decoded = "";
+    if ((text.length() % 2) != 0) return decoded;
+
+    decoded.reserve(text.length() / 2);
+    for (int i = 0; i < text.length(); i += 2) {
+        uint8_t value = 0;
+        if (!decodeHexByte(text, i, value)) {
+            decoded = "";
+            break;
+        }
+        decoded += static_cast<char>(value);
+    }
+    return decoded;
+}
+
+String encodeMacroSteps(const std::vector<AMMacroStep>& steps) {
+    String encoded = "";
+    for (size_t i = 0; i < steps.size(); ++i) {
+        if (i > 0) encoded += ',';
+        encoded += toHexDigit((steps[i].modifiers >> 4) & 0x0F);
+        encoded += toHexDigit(steps[i].modifiers & 0x0F);
+        for (size_t key = 0; key < 6; ++key) {
+            encoded += toHexDigit((steps[i].keys[key] >> 4) & 0x0F);
+            encoded += toHexDigit(steps[i].keys[key] & 0x0F);
+        }
+    }
+    return encoded;
+}
+
+bool decodeMacroSteps(const String& text, std::vector<AMMacroStep>& steps) {
+    steps.clear();
+    if (text.length() == 0) return true;
+
+    int start = 0;
+    while (start < text.length()) {
+        int end = text.indexOf(',', start);
+        if (end < 0) end = text.length();
+
+        String chunk = text.substring(start, end);
+        chunk.trim();
+        if (chunk.length() != 14) return false;
+
+        AMMacroStep step;
+        if (!decodeHexByte(chunk, 0, step.modifiers)) return false;
+        for (int i = 0; i < 6; ++i) {
+            if (!decodeHexByte(chunk, 2 + (i * 2), step.keys[i])) return false;
+        }
+        steps.push_back(step);
+        start = end + 1;
+    }
+
+    return true;
+}
+
+void loadAMMacros() {
+    for (size_t i = 0; i < AM_MACRO_SLOT_COUNT; ++i) {
+        clearMacroSlot(static_cast<int>(i));
+    }
+
+    if (!sdAvailable || !SD.exists(amMacroConfigPath)) return;
+
+    File file = SD.open(amMacroConfigPath, FILE_READ);
+    if (!file) return;
+
+    while (file.available()) {
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (!line.length()) continue;
+
+        const int separator = line.indexOf('=');
+        if (separator < 0) continue;
+
+        String key = line.substring(0, separator);
+        String value = line.substring(separator + 1);
+        key.trim();
+        value.trim();
+
+        if (!key.startsWith("macro_")) continue;
+
+        const int secondSeparator = key.indexOf('_', 6);
+        if (secondSeparator < 0) continue;
+
+        const int slot = key.substring(6, secondSeparator).toInt();
+        if (slot < 0 || slot >= static_cast<int>(AM_MACRO_SLOT_COUNT)) continue;
+
+        const String field = key.substring(secondSeparator + 1);
+        if (field.equalsIgnoreCase("text")) {
+            amMacroSlots[slot].preview = decodeHexText(value);
+        } else if (field.equalsIgnoreCase("steps")) {
+            decodeMacroSteps(value, amMacroSlots[slot].steps);
+        }
+    }
+
+    file.close();
+}
+
+void saveAMMacros() {
+    if (!sdAvailable) return;
+
+    if (SD.exists(amMacroConfigPath)) SD.remove(amMacroConfigPath);
+
+    File file = SD.open(amMacroConfigPath, FILE_WRITE);
+    if (!file) return;
+
+    for (size_t i = 0; i < AM_MACRO_SLOT_COUNT; ++i) {
+        if (amMacroSlots[i].preview.length() == 0 && amMacroSlots[i].steps.empty()) continue;
+
+        const String prefix = "macro_" + String(static_cast<int>(i)) + "_";
+        writeConfigLine(file, prefix + "text", encodeHexText(amMacroSlots[i].preview));
+        writeConfigLine(file, prefix + "steps", encodeMacroSteps(amMacroSlots[i].steps));
+    }
+
+    file.close();
+}
+
+void setMacroStatus(const String& message, unsigned long now, unsigned long duration = AM_MACRO_STATUS_MS) {
+    amMacroStatusMessage = message;
+    amMacroStatusUntil = now + duration;
+}
+
+bool hasMacroStatus(unsigned long now) {
+    return amMacroStatusMessage.length() > 0 && now < amMacroStatusUntil;
+}
+
+String getMacroSlotPreview(int slot) {
+    if (!isMacroSlotUsed(slot)) return "[empty]";
+    return amMacroSlots[slot].preview.length() ? amMacroSlots[slot].preview : "[saved]";
+}
+
+void wrapTextLines(const String& text, int maxChars, std::vector<String>& lines) {
+    lines.clear();
+    if (maxChars <= 0) {
+        lines.push_back(text);
+        return;
+    }
+
+    int start = 0;
+    while (start < text.length()) {
+        while (start < text.length() && text.charAt(start) == ' ') ++start;
+        if (start >= text.length()) break;
+
+        int hardEnd = start + maxChars;
+        if (hardEnd >= text.length()) {
+            lines.push_back(text.substring(start));
+            break;
+        }
+
+        int split = hardEnd;
+        while (split > start && text.charAt(split) != ' ') --split;
+        if (split == start) split = hardEnd;
+
+        String line = text.substring(start, split);
+        line.trim();
+        if (!line.length()) line = text.substring(start, hardEnd);
+        lines.push_back(line);
+        start = split;
+    }
+
+    if (lines.empty()) lines.push_back("");
 }
 
 uint16_t amGradientColor(int step, int totalSteps) {
@@ -330,6 +604,79 @@ String getPreviewText(const Keyboard_Class::KeysState& keyState) {
     return preview;
 }
 
+bool macroStepEquals(const AMMacroStep& left, const AMMacroStep& right) {
+    if (left.modifiers != right.modifiers) return false;
+    for (int i = 0; i < 6; ++i) {
+        if (left.keys[i] != right.keys[i]) return false;
+    }
+    return true;
+}
+
+bool isMacroStepEmpty(const AMMacroStep& step) {
+    if (step.modifiers != 0) return false;
+    for (int i = 0; i < 6; ++i) {
+        if (step.keys[i] != 0) return false;
+    }
+    return true;
+}
+
+size_t getMacroStepKeyCount(const AMMacroStep& step) {
+    size_t count = 0;
+    for (int i = 0; i < 6; ++i) {
+        if (step.keys[i] != 0) count = static_cast<size_t>(i + 1);
+    }
+    return count;
+}
+
+AMMacroStep buildMacroStep(const Keyboard_Class::KeysState& keyState) {
+    AMMacroStep step;
+    step.modifiers = keyState.modifiers;
+
+    size_t keyCount = 0;
+    for (uint8_t hidKey : keyState.hid_keys) {
+        if (keyCount < 6) step.keys[keyCount++] = remapFnArrowKey(keyState, hidKey);
+    }
+
+    return step;
+}
+
+void clearMacroInputTracking() {
+    amMacroHasLastInputStep = false;
+}
+
+void seedMacroInputTracking(const Keyboard_Class::KeysState& keyState) {
+    amMacroLastInputStep = buildMacroStep(keyState);
+    amMacroHasLastInputStep = true;
+}
+
+bool macroCharPressed(const Keyboard_Class::KeysState& keyState, char lower, char upper) {
+    for (char c : keyState.word) {
+        if (c == lower || c == upper) return true;
+    }
+    return false;
+}
+
+bool macroBacktickPressed(const Keyboard_Class::KeysState& keyState) {
+    for (char c : keyState.word) {
+        if (c == '`') return true;
+    }
+    return false;
+}
+
+int getPressedMacroSlot(const Keyboard_Class::KeysState& keyState) {
+    for (char c : keyState.word) {
+        const int slot = getMacroSlotIndex(c);
+        if (slot >= 0) return slot;
+    }
+    return -1;
+}
+
+void appendMacroPreviewToken(const String& token) {
+    if (!token.length() || token == "Ready to type") return;
+    if (amMacroRecordingPreview.length() > 0) amMacroRecordingPreview += " | ";
+    amMacroRecordingPreview += token;
+}
+
 bool hasExitHint(unsigned long now) {
     return amExitArmed && (now - amExitArmMillis) <= AM_EXIT_DOUBLE_TAP_MS;
 }
@@ -367,6 +714,160 @@ void drawAMMouseHelpOverlay() {
     M5.Display.printf("L:%s  R:%s  M:%s", getBindingLabel(leftClickBinding), getBindingLabel(rightClickBinding), getBindingLabel(middleClickBinding));
     M5.Display.setCursor(24, 102);
     M5.Display.printf("Back:%s  Fwd:%s", getBindingLabel(backClickBinding), getBindingLabel(forwardClickBinding));
+}
+
+void drawWrappedTextBlock(const String& text, int x, int y, int maxChars, int maxLines, uint16_t color) {
+    std::vector<String> lines;
+    wrapTextLines(text, maxChars, lines);
+
+    M5.Display.setTextSize(1);
+    M5.Display.setTextColor(color);
+    for (int i = 0; i < maxLines && i < static_cast<int>(lines.size()); ++i) {
+        M5.Display.setCursor(x, y + (i * 10));
+        M5.Display.println(lines[i]);
+    }
+}
+
+void buildMacroListLines(std::vector<String>& lines) {
+    lines.clear();
+
+    for (int slot = 0; slot < static_cast<int>(AM_MACRO_SLOT_COUNT); ++slot) {
+        std::vector<String> wrapped;
+        wrapTextLines(getMacroSlotPreview(slot), 31, wrapped);
+        if (wrapped.empty()) wrapped.push_back("[empty]");
+
+        lines.push_back(String(getMacroSlotLabel(slot)) + ": " + wrapped[0]);
+        for (size_t i = 1; i < wrapped.size(); ++i) {
+            lines.push_back(String("   ") + wrapped[i]);
+        }
+    }
+}
+
+void drawAMMacroHome() {
+    drawAMBackground();
+    drawAMHeader("Macro Mode", amControlMode == AM_MODE_MOUSE ? "Overlay on Mouse mode" : "Overlay on Keyboard mode");
+
+    drawAMCard(10, 34, 104, 28, false);
+    drawAMCardTitle(20, 41, "Source", false);
+    drawAMCardValue(20, 51, getModeText(), false);
+
+    drawAMCard(126, 34, 104, 28, false);
+    drawAMCardTitle(136, 41, "Saved", false);
+    drawAMCardValue(136, 51, String(getUsedMacroCount()) + "/10", false);
+
+    drawAMCard(10, 68, 220, 50, false);
+    drawAMCardTitle(20, 75, "Commands", false);
+    M5.Display.setTextColor(WHITE);
+    M5.Display.setCursor(20, 86);
+    M5.Display.println("1..0 play macro");
+    M5.Display.setCursor(20, 96);
+    M5.Display.println("R record/replace   L list macros");
+    M5.Display.setCursor(20, 106);
+    M5.Display.println("Hold BtnA to return");
+
+    const bool showStatus = hasMacroStatus(millis());
+    if (showStatus) {
+        drawAMFooter(amMacroStatusMessage, "", TFT_YELLOW);
+    }
+}
+
+void drawAMMacroRecordSelect() {
+    drawAMBackground();
+    drawAMHeader("Record Macro", "Choose a slot from 1 to 0");
+
+    drawAMCard(10, 34, 220, 62, false);
+    drawAMCardTitle(20, 41, "How to", false);
+    drawWrappedTextBlock("Press 1..0 to overwrite or create the corresponding macro slot. Press R or ` to cancel.",
+                         20, 54, 32, 4, WHITE);
+
+    drawAMCard(10, 102, 220, 16, false);
+    drawAMCardTitle(20, 107, "Filled", false);
+    drawAMCardValue(62, 107, String(getUsedMacroCount()) + " saved macros", false);
+}
+
+void drawAMMacroRecording() {
+    const String title = String("Recording Slot ") + getMacroSlotLabel(amMacroSelectedSlot);
+    drawAMBackground();
+    drawAMHeader(title.c_str(), "Press ` to stop and save");
+
+    drawAMCard(10, 34, 220, 76, false);
+    drawAMCardTitle(20, 41, "Captured", false);
+
+    const String content = amMacroRecordingPreview.length() ? amMacroRecordingPreview : String("Press keys to start recording");
+    drawWrappedTextBlock(content, 20, 54, 32, 5, WHITE);
+
+    M5.Display.setTextColor(M5.Display.color565(220, 245, 255));
+    M5.Display.setCursor(20, 104);
+    M5.Display.printf("Steps: %d", static_cast<int>(amMacroRecordingSteps.size()));
+
+    drawAMFooter("Hold BtnA exits", "` save macro", TFT_YELLOW);
+}
+
+void drawAMMacroList() {
+    drawAMBackground();
+    drawAMHeader("Macro List", "Use ; and . to scroll");
+
+    drawAMCard(10, 34, 220, 76, false);
+
+    std::vector<String> lines;
+    buildMacroListLines(lines);
+
+    const int visibleLines = 7;
+    const int maxScroll = lines.size() > visibleLines ? static_cast<int>(lines.size()) - visibleLines : 0;
+    if (amMacroListScroll > maxScroll) amMacroListScroll = maxScroll;
+    if (amMacroListScroll < 0) amMacroListScroll = 0;
+
+    M5.Display.setTextSize(1);
+    M5.Display.setTextColor(WHITE);
+    int y = 42;
+    for (int i = 0; i < visibleLines && (amMacroListScroll + i) < static_cast<int>(lines.size()); ++i) {
+        M5.Display.setCursor(18, y);
+        M5.Display.println(lines[amMacroListScroll + i]);
+        y += 10;
+    }
+
+    if (maxScroll > 0) {
+        M5.Display.setTextColor(M5.Display.color565(220, 245, 255));
+        M5.Display.setCursor(210, 38);
+        M5.Display.print("^");
+        M5.Display.setCursor(210, 100);
+        M5.Display.print("v");
+    }
+
+    drawAMFooter(";/. scroll", "L or ` close", M5.Display.color565(220, 245, 255));
+}
+
+void drawAMMacroPlayback() {
+    const String title = String("Playing Slot ") + getMacroSlotLabel(amMacroPlaybackSlot);
+    drawAMBackground();
+    drawAMHeader(title.c_str(), "Sending the saved key sequence");
+
+    drawAMCard(10, 40, 220, 58, false);
+    drawAMCardTitle(20, 47, "Content", false);
+    drawWrappedTextBlock(getMacroSlotPreview(amMacroPlaybackSlot), 20, 60, 32, 4, WHITE);
+
+    drawAMFooter("Playback running", "Hold BtnA exit", TFT_YELLOW);
+}
+
+void drawAMMacroUI() {
+    switch (amMacroView) {
+        case AM_MACRO_VIEW_RECORD_SELECT:
+            drawAMMacroRecordSelect();
+            break;
+        case AM_MACRO_VIEW_RECORDING:
+            drawAMMacroRecording();
+            break;
+        case AM_MACRO_VIEW_LIST:
+            drawAMMacroList();
+            break;
+        case AM_MACRO_VIEW_PLAYBACK:
+            drawAMMacroPlayback();
+            break;
+        case AM_MACRO_VIEW_HOME:
+        default:
+            drawAMMacroHome();
+            break;
+    }
 }
 
 void drawAMMainUI(const Keyboard_Class::KeysState* keyState = nullptr) {
@@ -484,7 +985,8 @@ void drawAMMenu() {
 }
 
 void refreshAMUI(const Keyboard_Class::KeysState* keyState = nullptr) {
-    if (amInMenu) drawAMMenu();
+    if (amMacroMode) drawAMMacroUI();
+    else if (amInMenu) drawAMMenu();
     else drawAMMainUI(keyState);
 }
 
@@ -524,6 +1026,273 @@ void updateMenuSetting(int direction) {
             break;
         default:
             break;
+    }
+}
+
+void resetMacroRecordingBuffers() {
+    amMacroSelectedSlot = -1;
+    amMacroRecordingSteps.clear();
+    amMacroRecordingPreview = "";
+    amMacroRecordingTruncated = false;
+}
+
+void enterMacroMode(const Keyboard_Class::KeysState& keyState, unsigned long now) {
+    clearExitArm();
+    releaseAllAMButtons();
+    amShowMouseHelp = false;
+    amMacroMode = true;
+    amMacroView = AM_MACRO_VIEW_HOME;
+    amMacroListScroll = 0;
+    amMacroPlaybackSlot = -1;
+    amMacroPlaybackIndex = 0;
+    amMacroPlaybackMillis = 0;
+    resetMacroRecordingBuffers();
+    setMacroStatus("Macro mode ready", now, 1400);
+    seedMacroInputTracking(keyState);
+    refreshAMUI();
+}
+
+void exitMacroMode(const Keyboard_Class::KeysState& keyState) {
+    releaseAllAMButtons();
+    clearExitArm();
+    amMacroMode = false;
+    amMacroView = AM_MACRO_VIEW_HOME;
+    amMacroListScroll = 0;
+    amMacroPlaybackSlot = -1;
+    amMacroPlaybackIndex = 0;
+    amMacroPlaybackMillis = 0;
+    amMacroStatusMessage = "";
+    amMacroStatusUntil = 0;
+    resetMacroRecordingBuffers();
+    clearMacroInputTracking();
+    refreshAMUI(amControlMode == AM_MODE_KEYBOARD ? &keyState : nullptr);
+}
+
+void openMacroHome(const Keyboard_Class::KeysState& keyState) {
+    amMacroView = AM_MACRO_VIEW_HOME;
+    amMacroListScroll = 0;
+    resetMacroRecordingBuffers();
+    amMacroPlaybackSlot = -1;
+    amMacroPlaybackIndex = 0;
+    amMacroPlaybackMillis = 0;
+    seedMacroInputTracking(keyState);
+    refreshAMUI();
+}
+
+void beginMacroRecordingSelection(const Keyboard_Class::KeysState& keyState) {
+    amMacroView = AM_MACRO_VIEW_RECORD_SELECT;
+    resetMacroRecordingBuffers();
+    seedMacroInputTracking(keyState);
+    refreshAMUI();
+}
+
+void beginMacroRecording(int slot, const Keyboard_Class::KeysState& keyState) {
+    amMacroSelectedSlot = slot;
+    amMacroRecordingSteps.clear();
+    amMacroRecordingPreview = "";
+    amMacroRecordingTruncated = false;
+    amMacroView = AM_MACRO_VIEW_RECORDING;
+    seedMacroInputTracking(keyState);
+    refreshAMUI();
+}
+
+void finishMacroRecording(unsigned long now) {
+    if (amMacroSelectedSlot < 0 || amMacroSelectedSlot >= static_cast<int>(AM_MACRO_SLOT_COUNT)) {
+        openMacroHome(M5Cardputer.Keyboard.keysState());
+        return;
+    }
+
+    if (!amMacroRecordingSteps.empty()
+        && !isMacroStepEmpty(amMacroRecordingSteps.back())
+        && amMacroRecordingSteps.size() < AM_MACRO_MAX_STEPS) {
+        amMacroRecordingSteps.push_back(AMMacroStep());
+    }
+
+    amMacroSlots[amMacroSelectedSlot].steps = amMacroRecordingSteps;
+    amMacroSlots[amMacroSelectedSlot].preview = amMacroRecordingSteps.empty() ? "" : amMacroRecordingPreview;
+    saveAMMacros();
+
+    String message = "Slot ";
+    message += getMacroSlotLabel(amMacroSelectedSlot);
+    if (amMacroRecordingSteps.empty()) {
+        message += " cleared";
+    } else if (amMacroRecordingTruncated) {
+        message += " saved (max)";
+    } else {
+        message += " saved";
+    }
+
+    resetMacroRecordingBuffers();
+    amMacroView = AM_MACRO_VIEW_HOME;
+    setMacroStatus(message, now, 2200);
+    seedMacroInputTracking(M5Cardputer.Keyboard.keysState());
+    refreshAMUI();
+}
+
+void openMacroList(const Keyboard_Class::KeysState& keyState) {
+    amMacroView = AM_MACRO_VIEW_LIST;
+    amMacroListScroll = 0;
+    seedMacroInputTracking(keyState);
+    refreshAMUI();
+}
+
+void startMacroPlayback(int slot, unsigned long now) {
+    if (!bleCombo.isConnected()) {
+        setMacroStatus("BLE keyboard not connected", now);
+        refreshAMUI();
+        return;
+    }
+
+    if (!isMacroSlotUsed(slot)) {
+        String message = "Slot ";
+        message += getMacroSlotLabel(slot);
+        message += " empty";
+        setMacroStatus(message, now);
+        refreshAMUI();
+        return;
+    }
+
+    releaseAllAMButtons();
+    amMacroPlaybackSlot = slot;
+    amMacroPlaybackIndex = 0;
+    amMacroPlaybackMillis = 0;
+    amMacroView = AM_MACRO_VIEW_PLAYBACK;
+    clearMacroInputTracking();
+    refreshAMUI();
+}
+
+void stopMacroPlayback(unsigned long now, bool canceled = false) {
+    const int slot = amMacroPlaybackSlot;
+
+    bleCombo.releaseKeyboard();
+    amMacroPlaybackSlot = -1;
+    amMacroPlaybackIndex = 0;
+    amMacroPlaybackMillis = 0;
+    amMacroView = AM_MACRO_VIEW_HOME;
+
+    if (slot >= 0) {
+        String message = canceled ? "Playback canceled" : String("Slot ") + getMacroSlotLabel(slot) + " played";
+        setMacroStatus(message, now, 1800);
+    }
+
+    seedMacroInputTracking(M5Cardputer.Keyboard.keysState());
+    refreshAMUI();
+}
+
+void updateMacroPlayback(unsigned long now) {
+    if (amMacroView != AM_MACRO_VIEW_PLAYBACK || amMacroPlaybackSlot < 0) return;
+
+    const std::vector<AMMacroStep>& steps = amMacroSlots[amMacroPlaybackSlot].steps;
+    if (amMacroPlaybackIndex >= steps.size()) {
+        stopMacroPlayback(now);
+        return;
+    }
+
+    if (amMacroPlaybackMillis != 0 && (now - amMacroPlaybackMillis) < AM_MACRO_PLAYBACK_STEP_MS) return;
+
+    const AMMacroStep& step = steps[amMacroPlaybackIndex++];
+    bleCombo.sendKeyboardReport(step.modifiers, step.keys, getMacroStepKeyCount(step));
+    amMacroPlaybackMillis = now;
+}
+
+void refreshExpiredMacroStatus(const Keyboard_Class::KeysState& keyState, unsigned long now) {
+    if (!amMacroStatusMessage.length() || now < amMacroStatusUntil) return;
+
+    amMacroStatusMessage = "";
+    amMacroStatusUntil = 0;
+    if (amMacroMode && amMacroView == AM_MACRO_VIEW_HOME) {
+        refreshAMUI(amControlMode == AM_MODE_KEYBOARD ? &keyState : nullptr);
+    }
+}
+
+void handleMacroMode(const Keyboard_Class::KeysState& keyState, unsigned long now) {
+    if (amMacroView == AM_MACRO_VIEW_PLAYBACK) {
+        updateMacroPlayback(now);
+        return;
+    }
+
+    const AMMacroStep currentStep = buildMacroStep(keyState);
+    const bool changed = !amMacroHasLastInputStep || !macroStepEquals(currentStep, amMacroLastInputStep);
+    if (!changed) return;
+
+    amMacroLastInputStep = currentStep;
+    amMacroHasLastInputStep = true;
+
+    if (amMacroView == AM_MACRO_VIEW_HOME) {
+        const int slot = getPressedMacroSlot(keyState);
+        if (slot >= 0) {
+            startMacroPlayback(slot, now);
+            return;
+        }
+
+        if (macroCharPressed(keyState, 'r', 'R')) {
+            beginMacroRecordingSelection(keyState);
+            return;
+        }
+
+        if (macroCharPressed(keyState, 'l', 'L')) {
+            openMacroList(keyState);
+        }
+        return;
+    }
+
+    if (amMacroView == AM_MACRO_VIEW_RECORD_SELECT) {
+        const int slot = getPressedMacroSlot(keyState);
+        if (slot >= 0) {
+            beginMacroRecording(slot, keyState);
+            return;
+        }
+
+        if (macroCharPressed(keyState, 'r', 'R') || macroBacktickPressed(keyState)) {
+            openMacroHome(keyState);
+            setMacroStatus("Record canceled", now, 1600);
+            refreshAMUI();
+        }
+        return;
+    }
+
+    if (amMacroView == AM_MACRO_VIEW_RECORDING) {
+        if (macroBacktickPressed(keyState)) {
+            finishMacroRecording(now);
+            return;
+        }
+
+        if (isMacroStepEmpty(currentStep) && amMacroRecordingSteps.empty()) return;
+
+        if (amMacroRecordingSteps.size() >= AM_MACRO_MAX_STEPS) {
+            amMacroRecordingTruncated = true;
+            finishMacroRecording(now);
+            return;
+        }
+
+        if (!isMacroStepEmpty(currentStep)) {
+            String preview = getPreviewText(keyState);
+            preview.trim();
+            appendMacroPreviewToken(preview);
+        }
+
+        amMacroRecordingSteps.push_back(currentStep);
+        refreshAMUI();
+        return;
+    }
+
+    if (amMacroView == AM_MACRO_VIEW_LIST) {
+        if (macroCharPressed(keyState, 'l', 'L') || macroBacktickPressed(keyState) || keyState.enter) {
+            openMacroHome(keyState);
+            return;
+        }
+
+        std::vector<String> lines;
+        buildMacroListLines(lines);
+        const int maxScroll = lines.size() > 7 ? static_cast<int>(lines.size()) - 7 : 0;
+
+        if (M5Cardputer.Keyboard.isKeyPressed(';') && amMacroListScroll > 0) {
+            --amMacroListScroll;
+            refreshAMUI();
+        } else if (M5Cardputer.Keyboard.isKeyPressed('.') && amMacroListScroll < maxScroll) {
+            ++amMacroListScroll;
+            refreshAMUI();
+        }
     }
 }
 
@@ -772,11 +1541,23 @@ void airMouseInit() {
 
 void airMouseResetUI() {
     loadAMSettings();
+    loadAMMacros();
     amInMenu = false;
     amMenuIndex = 0;
     amSettingsChanged = false;
     amControlMode = AM_MODE_MOUSE;
     amShowMouseHelp = false;
+    amMacroMode = false;
+    amBtnALongHandled = false;
+    amMacroView = AM_MACRO_VIEW_HOME;
+    amMacroListScroll = 0;
+    amMacroPlaybackSlot = -1;
+    amMacroPlaybackIndex = 0;
+    amMacroPlaybackMillis = 0;
+    amMacroStatusMessage = "";
+    amMacroStatusUntil = 0;
+    resetMacroRecordingBuffers();
+    clearMacroInputTracking();
     amWasConnected = bleCombo.isConnected();
     amDelWasPressed = false;
     clearExitArm();
@@ -794,18 +1575,40 @@ void airMouseLoop() {
     const Keyboard_Class::KeysState& keyState = M5Cardputer.Keyboard.keysState();
     const unsigned long now = millis();
 
-    flushPendingExitAction(keyState, now);
-    if (handleExitGesture(keyState, now)) return;
+    refreshExpiredMacroStatus(keyState, now);
+
+    if (!amInMenu && !amBtnALongHandled && M5.BtnA.pressedFor(AM_MACRO_HOLD_MS)) {
+        amBtnALongHandled = true;
+        if (amMacroMode) exitMacroMode(keyState);
+        else enterMacroMode(keyState, now);
+        return;
+    }
+
+    if (!amMacroMode) {
+        flushPendingExitAction(keyState, now);
+        if (handleExitGesture(keyState, now)) {
+            if (M5.BtnA.wasReleased()) amBtnALongHandled = false;
+            return;
+        }
+    }
 
     if (bleCombo.isConnected() != amWasConnected) {
         amWasConnected = bleCombo.isConnected();
         refreshAMUI(amControlMode == AM_MODE_KEYBOARD ? &keyState : nullptr);
     }
 
-    if (!amInMenu && M5Cardputer.BtnA.wasPressed()) {
+    if (amMacroMode) {
+        handleMacroMode(keyState, now);
+        if (M5.BtnA.wasReleased()) amBtnALongHandled = false;
+        return;
+    }
+
+    if (!amInMenu && M5.BtnA.wasReleased() && !amBtnALongHandled) {
         toggleControlMode(keyState);
         return;
     }
+
+    if (M5.BtnA.wasReleased()) amBtnALongHandled = false;
 
     if (amInMenu) {
         handleSettingsMenu(now);

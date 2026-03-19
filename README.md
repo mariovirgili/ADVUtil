@@ -68,6 +68,17 @@ Thanks to u/Russian_man_ who pointed these out, especially the suggestion about 
 
 
 ___________________________________
+V0.5 changelog:
+
+Added Macro Mode for Air Mouse and Keyboard overlays
+Hold BtnA for 2 seconds to enter or exit Macro Mode
+Press 1 to 0 to play one of the 10 saved macros
+Press R to record or replace a macro, then stop recording with backtick
+Press L to view the saved macros in a scrollable list
+Macro contents are saved on SD card and restored on startup
+
+
+___________________________________
 V0.4 changelog:
 
 Added a new Bluetooth keyboard mode
