@@ -84,7 +84,7 @@ void drawMenu() {
         M5.Display.setTextSize(2);
         M5.Display.setTextColor(textColor);
         M5.Display.setCursor(55, itemY);
-        if (i == 0) M5.Display.println("Air Mouse");
+        if (i == 0) M5.Display.println("Air Mouse/Kbd");
         if (i == 1) M5.Display.println("GPS Info");
     }
 
