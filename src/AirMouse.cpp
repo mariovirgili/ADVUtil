@@ -38,10 +38,29 @@ enum AMBindingKey : uint8_t {
     AM_BIND_COUNT
 };
 
+enum AMKeyboardLayout : uint8_t {
+    AM_LAYOUT_NONE = 0,
+    AM_LAYOUT_US,
+    AM_LAYOUT_IT,
+    AM_LAYOUT_UK,
+    AM_LAYOUT_FR,
+    AM_LAYOUT_DE,
+    AM_LAYOUT_DA,
+    AM_LAYOUT_ES,
+    AM_LAYOUT_HU,
+    AM_LAYOUT_PT_BR,
+    AM_LAYOUT_PT_PT,
+    AM_LAYOUT_SV,
+    AM_LAYOUT_COUNT
+};
+
+AMKeyboardLayout amKeyboardLayout = AM_LAYOUT_NONE;
+
 enum AMMenuItem : int {
     AM_MENU_SENSITIVITY = 0,
     AM_MENU_INVERT_X,
     AM_MENU_INVERT_Y,
+    AM_MENU_LAYOUT,
     AM_MENU_LEFT_CLICK,
     AM_MENU_RIGHT_CLICK,
     AM_MENU_MIDDLE_CLICK,
@@ -64,9 +83,27 @@ enum AMMacroView : uint8_t {
     AM_MACRO_VIEW_PLAYBACK
 };
 
+enum AMMacroKeyKind : uint8_t {
+    AM_MACRO_KEY_NONE = 0,
+    AM_MACRO_KEY_CHAR,
+    AM_MACRO_KEY_ENTER,
+    AM_MACRO_KEY_BACKSPACE,
+    AM_MACRO_KEY_TAB,
+    AM_MACRO_KEY_UP,
+    AM_MACRO_KEY_LEFT,
+    AM_MACRO_KEY_DOWN,
+    AM_MACRO_KEY_RIGHT,
+    AM_MACRO_KEY_HID
+};
+
+struct AMMacroKey {
+    AMMacroKeyKind kind = AM_MACRO_KEY_NONE;
+    uint8_t value = 0;
+};
+
 struct AMMacroStep {
     uint8_t modifiers = 0;
-    uint8_t keys[6] = {0, 0, 0, 0, 0, 0};
+    AMMacroKey keys[6];
 };
 
 struct AMMacroSlot {
@@ -88,6 +125,7 @@ bool amWasConnected = false;
 bool amDelWasPressed = false;
 bool amExitArmed = false;
 unsigned long amExitArmMillis = 0;
+int amLayoutSelectionIndex = 0;
 AMControlMode amControlMode = AM_MODE_MOUSE;
 String amLastKeyboardPreview = "";
 bool amLastKeyboardHintVisible = false;
@@ -106,6 +144,8 @@ bool amMacroRecordingTruncated = false;
 AMMacroView amMacroView = AM_MACRO_VIEW_HOME;
 AMMacroStep amMacroLastInputStep;
 bool amMacroHasLastInputStep = false;
+AMMacroStep amLastKeyboardStep;
+bool amHasLastKeyboardStep = false;
 std::vector<AMMacroStep> amMacroRecordingSteps;
 AMMacroSlot amMacroSlots[10];
 
@@ -119,8 +159,163 @@ constexpr uint8_t AM_HID_RIGHT_ARROW = 0x4F;
 constexpr uint8_t AM_HID_LEFT_ARROW = 0x50;
 constexpr uint8_t AM_HID_DOWN_ARROW = 0x51;
 constexpr uint8_t AM_HID_UP_ARROW = 0x52;
+constexpr uint8_t AM_HID_MOD_LEFT_CTRL = 0x01;
+constexpr uint8_t AM_HID_MOD_LEFT_SHIFT = 0x02;
+constexpr uint8_t AM_HID_MOD_LEFT_ALT = 0x04;
+constexpr uint8_t AM_HID_MOD_RIGHT_ALT = 0x40;
+constexpr uint16_t AM_LAYOUT_KEY_MASK = 0x00FF;
+constexpr uint16_t AM_LAYOUT_SHIFT_MASK = 0x0100;
+constexpr uint16_t AM_LAYOUT_ALTGR_MASK = 0x0200;
+constexpr uint16_t AM_LAYOUT_DEADKEY_1_MASK = 0x0400;
+constexpr uint16_t AM_LAYOUT_DEADKEY_2_MASK = 0x0800;
+constexpr uint16_t AM_LAYOUT_DEADKEY_MASK = 0x0C00;
 
 void clearExitArm();
+
+static const uint16_t AM_LAYOUT_US_ASCII[] = {
+    44, 286, 308, 288, 289, 290, 292, 52, 294, 295, 293, 302,
+    54, 45, 55, 56, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 307, 51, 310, 46, 311, 312, 287, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 47,
+    49, 48, 291, 301, 53, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 303, 305, 304, 309
+};
+
+static const uint16_t AM_LAYOUT_IT_ASCII[] = {
+    44, 286, 287, 564, 289, 290, 291, 45, 293, 294, 304, 48,
+    54, 56, 55, 292, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 311, 310, 50, 295, 306, 301, 563, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 559,
+    53, 560, 302, 312, 0, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 0, 309, 0, 0
+};
+
+static const uint16_t AM_LAYOUT_UK_ASCII[] = {
+    44, 286, 287, 50, 289, 290, 292, 52, 294, 295, 293, 302,
+    54, 45, 55, 56, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 307, 51, 310, 46, 311, 312, 308, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 47,
+    100, 48, 291, 301, 53, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 303, 356, 304, 306
+};
+
+static const uint16_t AM_LAYOUT_FR_ASCII[] = {
+    44, 56, 32, 544, 48, 308, 30, 33, 34, 45, 49, 302,
+    16, 35, 310, 311, 295, 286, 287, 288, 289, 290, 291, 292,
+    293, 294, 55, 54, 50, 46, 306, 272, 551, 276, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 307, 273, 274,
+    275, 260, 277, 278, 279, 280, 281, 285, 283, 284, 282, 546,
+    549, 557, 550, 37, 548, 20, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 51, 17, 18, 19, 4, 21, 22,
+    23, 24, 25, 29, 27, 28, 26, 545, 547, 558, 543
+};
+
+static const uint16_t AM_LAYOUT_DE_ASCII[] = {
+    44, 286, 287, 49, 289, 290, 291, 305, 293, 294, 304, 48,
+    54, 56, 55, 292, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 311, 310, 50, 295, 306, 301, 532, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 285, 284, 549,
+    557, 550, 1068, 312, 2092, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 29, 28, 548, 562, 551, 560
+};
+
+static const uint16_t AM_LAYOUT_DA_ASCII[] = {
+    44, 286, 287, 288, 545, 290, 291, 49, 293, 294, 305, 45,
+    54, 56, 55, 292, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 311, 310, 50, 295, 306, 301, 543, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 549,
+    562, 550, 0, 312, 0, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 548, 558, 551, 0
+};
+
+static const uint16_t AM_LAYOUT_ES_ASCII[] = {
+    44, 286, 287, 544, 289, 290, 291, 45, 293, 294, 304, 48,
+    54, 56, 55, 292, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 311, 310, 50, 295, 306, 301, 543, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 559,
+    565, 560, 0, 312, 0, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 564, 542, 561, 0
+};
+
+static const uint16_t AM_LAYOUT_HU_ASCII[] = {
+    44, 289, 287, 539, 563, 290, 518, 286, 293, 294, 568, 288,
+    54, 56, 55, 291, 53, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 311, 566, 562, 292, 541, 310, 537, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 285, 284, 521,
+    532, 522, 544, 312, 548, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 29, 28, 517, 538, 529, 542
+};
+
+static const uint16_t AM_LAYOUT_PT_BR_ASCII[] = {
+    44, 286, 309, 288, 289, 290, 292, 53, 294, 295, 293, 302,
+    54, 45, 55, 532, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 312, 56, 310, 46, 311, 538, 287, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 48,
+    50, 49, 0, 301, 0, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 304, 306, 305, 0
+};
+
+static const uint16_t AM_LAYOUT_PT_PT_ASCII[] = {
+    44, 286, 287, 288, 289, 290, 291, 45, 293, 294, 303, 47,
+    54, 56, 55, 292, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 311, 310, 50, 295, 306, 301, 543, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 549,
+    53, 550, 0, 312, 0, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 548, 309, 551, 0
+};
+
+static const uint16_t AM_LAYOUT_SV_ASCII[] = {
+    44, 286, 287, 288, 545, 290, 291, 49, 293, 294, 305, 45,
+    54, 56, 55, 292, 39, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 311, 310, 50, 295, 306, 301, 543, 260, 261, 262,
+    263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274,
+    275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 549,
+    557, 550, 0, 312, 0, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 548, 562, 551, 0
+};
+
+struct AMLayoutDefinition {
+    AMKeyboardLayout layout;
+    const char* configValue;
+    const char* label;
+    const uint16_t* asciiMap;
+};
+
+static const AMLayoutDefinition AM_LAYOUT_DEFINITIONS[] = {
+    {AM_LAYOUT_US, "us", "US (QWERTY)", AM_LAYOUT_US_ASCII},
+    {AM_LAYOUT_IT, "it", "IT (QWERTY)", AM_LAYOUT_IT_ASCII},
+    {AM_LAYOUT_UK, "uk", "UK (QWERTY)", AM_LAYOUT_UK_ASCII},
+    {AM_LAYOUT_FR, "fr", "FR (AZERTY)", AM_LAYOUT_FR_ASCII},
+    {AM_LAYOUT_DE, "de", "DE (QWERTZ)", AM_LAYOUT_DE_ASCII},
+    {AM_LAYOUT_DA, "da", "DA (QWERTY)", AM_LAYOUT_DA_ASCII},
+    {AM_LAYOUT_ES, "es", "ES (QWERTY)", AM_LAYOUT_ES_ASCII},
+    {AM_LAYOUT_HU, "hu", "HU (QWERTZ)", AM_LAYOUT_HU_ASCII},
+    {AM_LAYOUT_PT_BR, "pt_br", "PT-BR (QWERTY)", AM_LAYOUT_PT_BR_ASCII},
+    {AM_LAYOUT_PT_PT, "pt_pt", "PT-PT (QWERTY)", AM_LAYOUT_PT_PT_ASCII},
+    {AM_LAYOUT_SV, "sv", "SV (QWERTY)", AM_LAYOUT_SV_ASCII},
+};
+
+constexpr int AM_LAYOUT_OPTION_COUNT =
+    static_cast<int>(sizeof(AM_LAYOUT_DEFINITIONS) / sizeof(AM_LAYOUT_DEFINITIONS[0]));
 
 const char* getBindingLabel(AMBindingKey binding) {
     switch (binding) {
@@ -154,6 +349,65 @@ AMBindingKey cycleBinding(AMBindingKey current, int direction) {
     if (next < 0) next = AM_BIND_COUNT - 1;
     if (next >= AM_BIND_COUNT) next = 0;
     return static_cast<AMBindingKey>(next);
+}
+
+const AMLayoutDefinition* findLayoutDefinition(AMKeyboardLayout layout) {
+    for (const AMLayoutDefinition& definition : AM_LAYOUT_DEFINITIONS) {
+        if (definition.layout == layout) return &definition;
+    }
+    return nullptr;
+}
+
+const char* getLayoutLabel(AMKeyboardLayout layout) {
+    const AMLayoutDefinition* definition = findLayoutDefinition(layout);
+    return definition ? definition->label : "Not set";
+}
+
+const char* getLayoutConfigValue(AMKeyboardLayout layout) {
+    const AMLayoutDefinition* definition = findLayoutDefinition(layout);
+    return definition ? definition->configValue : "none";
+}
+
+AMKeyboardLayout parseLayoutLabel(const String& value) {
+    if (value.equalsIgnoreCase("en_us")) return AM_LAYOUT_US;
+    if (value.equalsIgnoreCase("it_it")) return AM_LAYOUT_IT;
+    if (value.equalsIgnoreCase("fr_fr")) return AM_LAYOUT_FR;
+    if (value.equalsIgnoreCase("de_de")) return AM_LAYOUT_DE;
+    if (value.equalsIgnoreCase("da_dk")) return AM_LAYOUT_DA;
+    if (value.equalsIgnoreCase("es_es")) return AM_LAYOUT_ES;
+    if (value.equalsIgnoreCase("hu_hu")) return AM_LAYOUT_HU;
+    if (value.equalsIgnoreCase("pt_br")) return AM_LAYOUT_PT_BR;
+    if (value.equalsIgnoreCase("pt_pt")) return AM_LAYOUT_PT_PT;
+    if (value.equalsIgnoreCase("sv_se")) return AM_LAYOUT_SV;
+
+    for (const AMLayoutDefinition& definition : AM_LAYOUT_DEFINITIONS) {
+        if (value.equalsIgnoreCase(definition.configValue)) return definition.layout;
+    }
+    return AM_LAYOUT_NONE;
+}
+
+int getLayoutSelectionIndex(AMKeyboardLayout layout) {
+    for (int i = 0; i < AM_LAYOUT_OPTION_COUNT; ++i) {
+        if (AM_LAYOUT_DEFINITIONS[i].layout == layout) return i;
+    }
+    return 0;
+}
+
+AMKeyboardLayout getLayoutFromSelectionIndex(int index) {
+    if (index < 0 || index >= AM_LAYOUT_OPTION_COUNT) return AM_LAYOUT_US;
+    return AM_LAYOUT_DEFINITIONS[index].layout;
+}
+
+AMKeyboardLayout cycleLayout(AMKeyboardLayout current, int direction) {
+    int next = getLayoutSelectionIndex(current == AM_LAYOUT_NONE ? AM_LAYOUT_US : current) + direction;
+    while (next < 0) next += AM_LAYOUT_OPTION_COUNT;
+    while (next >= AM_LAYOUT_OPTION_COUNT) next -= AM_LAYOUT_OPTION_COUNT;
+    return getLayoutFromSelectionIndex(next);
+}
+
+const uint16_t* getLayoutAsciiMap(AMKeyboardLayout layout) {
+    const AMLayoutDefinition* definition = findLayoutDefinition(layout);
+    return definition ? definition->asciiMap : AM_LAYOUT_US_ASCII;
 }
 
 bool isAlphaKeyPressed(char lower, char upper) {
@@ -215,6 +469,8 @@ void applyConfigLine(const String& rawLine) {
         invertAxisX = value.toInt() != 0;
     } else if (key.equalsIgnoreCase("invert_y")) {
         invertAxisY = value.toInt() != 0;
+    } else if (key.equalsIgnoreCase("layout")) {
+        amKeyboardLayout = parseLayoutLabel(value);
     } else if (key.equalsIgnoreCase("left_click")) {
         leftClickBinding = parseBindingLabel(value);
     } else if (key.equalsIgnoreCase("right_click")) {
@@ -232,6 +488,7 @@ void loadAMSettings() {
     sensitivity = 0.15f;
     invertAxisX = false;
     invertAxisY = true;
+    amKeyboardLayout = AM_LAYOUT_NONE;
     leftClickBinding = AM_BIND_ENTER;
     rightClickBinding = AM_BIND_SPACE;
     middleClickBinding = AM_BIND_V;
@@ -259,6 +516,7 @@ void saveAMSettings() {
         writeConfigLine(file, "sensitivity", String(sensitivity, 2));
         writeConfigLine(file, "invert_x", invertAxisX ? "1" : "0");
         writeConfigLine(file, "invert_y", invertAxisY ? "1" : "0");
+        writeConfigLine(file, "layout", getLayoutConfigValue(amKeyboardLayout));
         writeConfigLine(file, "left_click", getBindingLabel(leftClickBinding));
         writeConfigLine(file, "right_click", getBindingLabel(rightClickBinding));
         writeConfigLine(file, "middle_click", getBindingLabel(middleClickBinding));
@@ -347,15 +605,28 @@ String decodeHexText(const String& text) {
     return decoded;
 }
 
+uint16_t packMacroKey(const AMMacroKey& key) {
+    return (static_cast<uint16_t>(key.kind) << 8) | key.value;
+}
+
+bool unpackMacroKey(uint16_t packed, AMMacroKey& key) {
+    key.kind = static_cast<AMMacroKeyKind>((packed >> 8) & 0xFF);
+    key.value = static_cast<uint8_t>(packed & 0xFF);
+    return key.kind <= AM_MACRO_KEY_HID;
+}
+
 String encodeMacroSteps(const std::vector<AMMacroStep>& steps) {
-    String encoded = "";
+    String encoded = "v2:";
     for (size_t i = 0; i < steps.size(); ++i) {
         if (i > 0) encoded += ',';
         encoded += toHexDigit((steps[i].modifiers >> 4) & 0x0F);
         encoded += toHexDigit(steps[i].modifiers & 0x0F);
         for (size_t key = 0; key < 6; ++key) {
-            encoded += toHexDigit((steps[i].keys[key] >> 4) & 0x0F);
-            encoded += toHexDigit(steps[i].keys[key] & 0x0F);
+            const uint16_t packed = packMacroKey(steps[i].keys[key]);
+            encoded += toHexDigit((packed >> 12) & 0x0F);
+            encoded += toHexDigit((packed >> 8) & 0x0F);
+            encoded += toHexDigit((packed >> 4) & 0x0F);
+            encoded += toHexDigit(packed & 0x0F);
         }
     }
     return encoded;
@@ -365,19 +636,50 @@ bool decodeMacroSteps(const String& text, std::vector<AMMacroStep>& steps) {
     steps.clear();
     if (text.length() == 0) return true;
 
-    int start = 0;
-    while (start < text.length()) {
-        int end = text.indexOf(',', start);
-        if (end < 0) end = text.length();
+    if (!text.startsWith("v2:")) {
+        int start = 0;
+        while (start < text.length()) {
+            int end = text.indexOf(',', start);
+            if (end < 0) end = text.length();
 
-        String chunk = text.substring(start, end);
+            String chunk = text.substring(start, end);
+            chunk.trim();
+            if (chunk.length() != 14) return false;
+
+            AMMacroStep step;
+            if (!decodeHexByte(chunk, 0, step.modifiers)) return false;
+            for (int i = 0; i < 6; ++i) {
+                uint8_t hidKey = 0;
+                if (!decodeHexByte(chunk, 2 + (i * 2), hidKey)) return false;
+                if (hidKey == 0) continue;
+                step.keys[i].kind = AM_MACRO_KEY_HID;
+                step.keys[i].value = hidKey;
+            }
+            steps.push_back(step);
+            start = end + 1;
+        }
+
+        return true;
+    }
+
+    const String payload = text.substring(3);
+    int start = 0;
+    while (start < payload.length()) {
+        int end = payload.indexOf(',', start);
+        if (end < 0) end = payload.length();
+
+        String chunk = payload.substring(start, end);
         chunk.trim();
-        if (chunk.length() != 14) return false;
+        if (chunk.length() != 26) return false;
 
         AMMacroStep step;
         if (!decodeHexByte(chunk, 0, step.modifiers)) return false;
         for (int i = 0; i < 6; ++i) {
-            if (!decodeHexByte(chunk, 2 + (i * 2), step.keys[i])) return false;
+            uint8_t high = 0;
+            uint8_t low = 0;
+            if (!decodeHexByte(chunk, 2 + (i * 4), high)) return false;
+            if (!decodeHexByte(chunk, 4 + (i * 4), low)) return false;
+            if (!unpackMacroKey(static_cast<uint16_t>((high << 8) | low), step.keys[i])) return false;
         }
         steps.push_back(step);
         start = end + 1;
@@ -561,53 +863,116 @@ const char* getFnArrowLabel(char key) {
     }
 }
 
-uint8_t remapFnArrowKey(const Keyboard_Class::KeysState& keyState, uint8_t hidKey) {
-    if (!keyState.fn) return hidKey;
-
-    switch (hidKey) {
-        case 0x33: return AM_HID_UP_ARROW;
-        case 0x36: return AM_HID_LEFT_ARROW;
-        case 0x37: return AM_HID_DOWN_ARROW;
-        case 0x38: return AM_HID_RIGHT_ARROW;
-        default:   return hidKey;
+AMMacroKeyKind getFnArrowKeyKind(char key) {
+    switch (key) {
+        case ';': return AM_MACRO_KEY_UP;
+        case ',': return AM_MACRO_KEY_LEFT;
+        case '.': return AM_MACRO_KEY_DOWN;
+        case '/': return AM_MACRO_KEY_RIGHT;
+        default:  return AM_MACRO_KEY_NONE;
     }
 }
 
-String getPreviewText(const Keyboard_Class::KeysState& keyState) {
-    if (keyState.hid_keys.empty() && keyState.modifiers == 0) return "Ready to type";
+void setMacroKey(AMMacroKey& key, AMMacroKeyKind kind, uint8_t value = 0) {
+    key.kind = kind;
+    key.value = value;
+}
 
-    String preview = "";
-    if (keyState.ctrl) preview += "Ctrl ";
-    if (keyState.shift) preview += "Shift ";
-    if (keyState.alt) preview += "Alt ";
+bool macroKeyEquals(const AMMacroKey& left, const AMMacroKey& right) {
+    return left.kind == right.kind && left.value == right.value;
+}
 
-    for (char c : keyState.word) {
-        if (preview.length() >= 24) break;
-        if (preview.length() > 0) preview += ' ';
+const char* getMacroKeyLabel(const AMMacroKey& key) {
+    switch (key.kind) {
+        case AM_MACRO_KEY_ENTER: return "Enter";
+        case AM_MACRO_KEY_BACKSPACE: return "Backspace";
+        case AM_MACRO_KEY_TAB: return "Tab";
+        case AM_MACRO_KEY_UP: return "Up";
+        case AM_MACRO_KEY_LEFT: return "Left";
+        case AM_MACRO_KEY_DOWN: return "Down";
+        case AM_MACRO_KEY_RIGHT: return "Right";
+        case AM_MACRO_KEY_HID: return "Key";
+        case AM_MACRO_KEY_CHAR:
+        case AM_MACRO_KEY_NONE:
+        default:
+            return nullptr;
+    }
+}
+
+AMMacroStep buildMacroStep(const Keyboard_Class::KeysState& keyState) {
+    AMMacroStep step;
+    size_t keyCount = 0;
+    bool hasCharKey = false;
+
+    if (keyState.tab && keyCount < 6) setMacroKey(step.keys[keyCount++], AM_MACRO_KEY_TAB);
+    if (keyState.del && keyCount < 6) setMacroKey(step.keys[keyCount++], AM_MACRO_KEY_BACKSPACE);
+    if (keyState.enter && keyCount < 6) setMacroKey(step.keys[keyCount++], AM_MACRO_KEY_ENTER);
+
+    for (char logicalChar : keyState.word) {
+        if (keyCount >= 6) break;
+
         if (keyState.fn) {
-            const char* arrowLabel = getFnArrowLabel(c);
-            if (arrowLabel != nullptr) {
-                preview += arrowLabel;
+            const AMMacroKeyKind arrowKind = getFnArrowKeyKind(logicalChar);
+            if (arrowKind != AM_MACRO_KEY_NONE) {
+                setMacroKey(step.keys[keyCount++], arrowKind);
                 continue;
             }
         }
-        if (c == ' ') preview += "Space";
-        else preview += c;
+
+        setMacroKey(step.keys[keyCount++], AM_MACRO_KEY_CHAR, static_cast<uint8_t>(logicalChar));
+        hasCharKey = true;
     }
 
-    if (preview.length() == 0) {
-        if (keyState.enter) preview = "Enter";
-        else if (keyState.del) preview = "Backspace";
-        else if (keyState.tab) preview = "Tab";
+    if (keyState.ctrl) step.modifiers |= AM_HID_MOD_LEFT_CTRL;
+    if (keyState.alt) step.modifiers |= AM_HID_MOD_LEFT_ALT;
+    if (keyState.shift && !hasCharKey) step.modifiers |= AM_HID_MOD_LEFT_SHIFT;
+
+    return step;
+}
+
+String getStepPreview(const AMMacroStep& step) {
+    if (step.modifiers == 0) {
+        bool hasKeys = false;
+        for (const AMMacroKey& key : step.keys) {
+            if (key.kind != AM_MACRO_KEY_NONE) {
+                hasKeys = true;
+                break;
+            }
+        }
+        if (!hasKeys) return "Ready to type";
     }
 
-    return preview;
+    String preview = "";
+    if (step.modifiers & AM_HID_MOD_LEFT_CTRL) preview += "Ctrl ";
+    if (step.modifiers & AM_HID_MOD_LEFT_SHIFT) preview += "Shift ";
+    if (step.modifiers & AM_HID_MOD_LEFT_ALT) preview += "Alt ";
+
+    for (const AMMacroKey& key : step.keys) {
+        if (key.kind == AM_MACRO_KEY_NONE) continue;
+        if (preview.length() >= 24) break;
+        if (preview.length() > 0) preview += ' ';
+
+        if (key.kind == AM_MACRO_KEY_CHAR) {
+            if (key.value == ' ') preview += "Space";
+            else preview += static_cast<char>(key.value);
+            continue;
+        }
+
+        const char* label = getMacroKeyLabel(key);
+        if (label != nullptr) preview += label;
+    }
+
+    return preview.length() ? preview : "Ready to type";
+}
+
+String getPreviewText(const Keyboard_Class::KeysState& keyState) {
+    return getStepPreview(buildMacroStep(keyState));
 }
 
 bool macroStepEquals(const AMMacroStep& left, const AMMacroStep& right) {
     if (left.modifiers != right.modifiers) return false;
     for (int i = 0; i < 6; ++i) {
-        if (left.keys[i] != right.keys[i]) return false;
+        if (!macroKeyEquals(left.keys[i], right.keys[i])) return false;
     }
     return true;
 }
@@ -615,29 +980,9 @@ bool macroStepEquals(const AMMacroStep& left, const AMMacroStep& right) {
 bool isMacroStepEmpty(const AMMacroStep& step) {
     if (step.modifiers != 0) return false;
     for (int i = 0; i < 6; ++i) {
-        if (step.keys[i] != 0) return false;
+        if (step.keys[i].kind != AM_MACRO_KEY_NONE) return false;
     }
     return true;
-}
-
-size_t getMacroStepKeyCount(const AMMacroStep& step) {
-    size_t count = 0;
-    for (int i = 0; i < 6; ++i) {
-        if (step.keys[i] != 0) count = static_cast<size_t>(i + 1);
-    }
-    return count;
-}
-
-AMMacroStep buildMacroStep(const Keyboard_Class::KeysState& keyState) {
-    AMMacroStep step;
-    step.modifiers = keyState.modifiers;
-
-    size_t keyCount = 0;
-    for (uint8_t hidKey : keyState.hid_keys) {
-        if (keyCount < 6) step.keys[keyCount++] = remapFnArrowKey(keyState, hidKey);
-    }
-
-    return step;
 }
 
 void clearMacroInputTracking() {
@@ -677,6 +1022,158 @@ void appendMacroPreviewToken(const String& token) {
     amMacroRecordingPreview += token;
 }
 
+bool getLayoutDeadKeyStroke(AMKeyboardLayout layout, uint16_t deadKeyBits, uint8_t& modifiers, uint8_t& key) {
+    modifiers = 0;
+    key = 0;
+
+    switch (layout) {
+        case AM_LAYOUT_DE:
+            if (deadKeyBits == AM_LAYOUT_DEADKEY_1_MASK) {
+                key = 53;
+                return true;
+            }
+            if (deadKeyBits == AM_LAYOUT_DEADKEY_2_MASK) {
+                modifiers = AM_HID_MOD_LEFT_SHIFT;
+                key = 46;
+                return true;
+            }
+            return false;
+        default:
+            return false;
+    }
+}
+
+bool translateLayoutChar(char c, uint8_t& modifiers, uint8_t& key, bool& usesDeadKey, uint8_t& deadModifiers, uint8_t& deadKey) {
+    modifiers = 0;
+    key = 0;
+    usesDeadKey = false;
+    deadModifiers = 0;
+    deadKey = 0;
+
+    if (c < 32 || c > 126) return false;
+
+    const uint16_t raw = getLayoutAsciiMap(amKeyboardLayout)[static_cast<uint8_t>(c) - 32];
+    if (raw == 0) return false;
+
+    const uint16_t deadKeyBits = raw & AM_LAYOUT_DEADKEY_MASK;
+    if (deadKeyBits != 0) {
+        if (!getLayoutDeadKeyStroke(amKeyboardLayout, deadKeyBits, deadModifiers, deadKey)) return false;
+        usesDeadKey = true;
+    }
+
+    if (raw & AM_LAYOUT_SHIFT_MASK) modifiers |= AM_HID_MOD_LEFT_SHIFT;
+    if (raw & AM_LAYOUT_ALTGR_MASK) modifiers |= AM_HID_MOD_RIGHT_ALT;
+    key = static_cast<uint8_t>(raw & AM_LAYOUT_KEY_MASK);
+    return key != 0;
+}
+
+bool translateMacroKeyToHid(const AMMacroKey& keyToken, uint8_t& modifiers, uint8_t& key, bool& usesDeadKey,
+                            uint8_t& deadModifiers, uint8_t& deadKey) {
+    modifiers = 0;
+    key = 0;
+    usesDeadKey = false;
+    deadModifiers = 0;
+    deadKey = 0;
+
+    switch (keyToken.kind) {
+        case AM_MACRO_KEY_NONE:
+            return false;
+        case AM_MACRO_KEY_CHAR:
+            return translateLayoutChar(static_cast<char>(keyToken.value), modifiers, key, usesDeadKey, deadModifiers, deadKey);
+        case AM_MACRO_KEY_ENTER:
+            key = KEY_ENTER;
+            return true;
+        case AM_MACRO_KEY_BACKSPACE:
+            key = KEY_BACKSPACE;
+            return true;
+        case AM_MACRO_KEY_TAB:
+            key = KEY_TAB;
+            return true;
+        case AM_MACRO_KEY_UP:
+            key = AM_HID_UP_ARROW;
+            return true;
+        case AM_MACRO_KEY_LEFT:
+            key = AM_HID_LEFT_ARROW;
+            return true;
+        case AM_MACRO_KEY_DOWN:
+            key = AM_HID_DOWN_ARROW;
+            return true;
+        case AM_MACRO_KEY_RIGHT:
+            key = AM_HID_RIGHT_ARROW;
+            return true;
+        case AM_MACRO_KEY_HID:
+            key = keyToken.value;
+            return key != 0;
+        default:
+            return false;
+    }
+}
+
+bool stepRequiresSequence(const AMMacroStep& step) {
+    for (const AMMacroKey& keyToken : step.keys) {
+        if (keyToken.kind != AM_MACRO_KEY_CHAR) continue;
+
+        uint8_t modifiers = 0;
+        uint8_t key = 0;
+        uint8_t deadModifiers = 0;
+        uint8_t deadKey = 0;
+        bool usesDeadKey = false;
+        if (!translateLayoutChar(static_cast<char>(keyToken.value), modifiers, key, usesDeadKey, deadModifiers, deadKey)) {
+            return true;
+        }
+        if (usesDeadKey) return true;
+    }
+
+    return false;
+}
+
+bool buildTranslatedKeyboardReport(const AMMacroStep& step, uint8_t& modifiers, uint8_t keys[6], size_t& keyCount) {
+    modifiers = step.modifiers;
+    keyCount = 0;
+    for (int i = 0; i < 6; ++i) keys[i] = 0;
+
+    for (const AMMacroKey& keyToken : step.keys) {
+        if (keyToken.kind == AM_MACRO_KEY_NONE) continue;
+
+        uint8_t keyModifiers = 0;
+        uint8_t key = 0;
+        uint8_t deadModifiers = 0;
+        uint8_t deadKey = 0;
+        bool usesDeadKey = false;
+        if (!translateMacroKeyToHid(keyToken, keyModifiers, key, usesDeadKey, deadModifiers, deadKey)) continue;
+        if (usesDeadKey) return false;
+
+        modifiers |= keyModifiers;
+        if (keyCount < 6) keys[keyCount++] = key;
+    }
+
+    return true;
+}
+
+void sendKeyboardTap(uint8_t modifiers, uint8_t key) {
+    const uint8_t keys[1] = {key};
+    bleCombo.sendKeyboardReport(modifiers, keys, 1);
+    delay(12);
+    bleCombo.releaseKeyboard();
+    delay(12);
+}
+
+void playTranslatedSequence(const AMMacroStep& step) {
+    for (const AMMacroKey& keyToken : step.keys) {
+        if (keyToken.kind == AM_MACRO_KEY_NONE) continue;
+
+        uint8_t keyModifiers = 0;
+        uint8_t key = 0;
+        uint8_t deadModifiers = 0;
+        uint8_t deadKey = 0;
+        bool usesDeadKey = false;
+        if (!translateMacroKeyToHid(keyToken, keyModifiers, key, usesDeadKey, deadModifiers, deadKey)) continue;
+
+        if (usesDeadKey) sendKeyboardTap(deadModifiers, deadKey);
+        sendKeyboardTap(step.modifiers | keyModifiers, key);
+    }
+}
+
 bool hasExitHint(unsigned long now) {
     return amExitArmed && (now - amExitArmMillis) <= AM_EXIT_DOUBLE_TAP_MS;
 }
@@ -690,6 +1187,35 @@ void drawAMFooter(const String& leftText, const String& rightText, uint16_t colo
     const int rightX = M5.Display.width() - (rightText.length() * 6) - 12;
     M5.Display.setCursor(rightX, 122);
     M5.Display.print(rightText);
+}
+
+void drawAMLayoutSetup() {
+    drawAMBackground();
+    drawAMHeader("First Time Setup", "Choose the host keyboard layout");
+
+    const int visibleCount = 5;
+    const int maxFirstVisible = AM_LAYOUT_OPTION_COUNT > visibleCount ? AM_LAYOUT_OPTION_COUNT - visibleCount : 0;
+    int firstVisible = amLayoutSelectionIndex - (visibleCount / 2);
+    if (firstVisible < 0) firstVisible = 0;
+    if (firstVisible > maxFirstVisible) firstVisible = maxFirstVisible;
+
+    M5.Display.setTextSize(1);
+    M5.Display.setTextColor(TFT_YELLOW);
+    const String counter = String(amLayoutSelectionIndex + 1) + "/" + String(AM_LAYOUT_OPTION_COUNT);
+    const int counterX = M5.Display.width() - (counter.length() * 6) - 16;
+    M5.Display.setCursor(counterX, 22);
+    M5.Display.print(counter);
+
+    int y = 34;
+    for (int i = 0; i < visibleCount && (firstVisible + i) < AM_LAYOUT_OPTION_COUNT; ++i) {
+        const int optionIndex = firstVisible + i;
+        const bool selected = optionIndex == amLayoutSelectionIndex;
+        drawAMCard(12, y, 216, 16, selected);
+        drawAMCardTitle(20, y + 5, AM_LAYOUT_DEFINITIONS[optionIndex].label, selected);
+        y += 18;
+    }
+
+    drawAMFooter(";/. navigate", "Ent or BtnA save", TFT_YELLOW);
 }
 
 void drawAMMouseHelpOverlay() {
@@ -777,7 +1303,7 @@ void drawAMMacroRecordSelect() {
 
     drawAMCard(10, 34, 220, 62, false);
     drawAMCardTitle(20, 41, "How to", false);
-    drawWrappedTextBlock("Press 1..0 to overwrite or create the corresponding macro slot. Press R or ` to cancel.",
+    drawWrappedTextBlock("Press 1..0 to overwrite or create the corresponding macro slot. Press R or ESC to cancel.",
                          20, 54, 32, 4, WHITE);
 
     drawAMCard(10, 102, 220, 16, false);
@@ -788,19 +1314,19 @@ void drawAMMacroRecordSelect() {
 void drawAMMacroRecording() {
     const String title = String("Recording Slot ") + getMacroSlotLabel(amMacroSelectedSlot);
     drawAMBackground();
-    drawAMHeader(title.c_str(), "Press ` to stop and save");
+    drawAMHeader(title.c_str(), "Press ESC to stop and save");
 
-    drawAMCard(10, 34, 220, 76, false);
+    drawAMCard(10, 34, 220, 84, false);
     drawAMCardTitle(20, 41, "Captured", false);
 
     const String content = amMacroRecordingPreview.length() ? amMacroRecordingPreview : String("Press keys to start recording");
     drawWrappedTextBlock(content, 20, 54, 32, 5, WHITE);
 
     M5.Display.setTextColor(M5.Display.color565(220, 245, 255));
-    M5.Display.setCursor(20, 104);
+    M5.Display.setCursor(20, 108);
     M5.Display.printf("Steps: %d", static_cast<int>(amMacroRecordingSteps.size()));
 
-    drawAMFooter("Hold BtnA exits", "` save macro", TFT_YELLOW);
+    drawAMFooter("Hold BtnA exits", "ESC save macro", TFT_YELLOW);
 }
 
 void drawAMMacroList() {
@@ -834,7 +1360,7 @@ void drawAMMacroList() {
         M5.Display.print("v");
     }
 
-    drawAMFooter(";/. scroll", "L or ` close", M5.Display.color565(220, 245, 255));
+    drawAMFooter(";/. scroll", "L or ESC close", M5.Display.color565(220, 245, 255));
 }
 
 void drawAMMacroPlayback() {
@@ -951,6 +1477,7 @@ void drawAMMenu() {
         "Sensitivity",
         "Invert X",
         "Invert Y",
+        "Layout",
         "Left Click",
         "Right Click",
         "Middle Click",
@@ -963,6 +1490,7 @@ void drawAMMenu() {
         String(sensitivity, 2),
         invertAxisX ? "On" : "Off",
         invertAxisY ? "On" : "Off",
+        getLayoutLabel(amKeyboardLayout),
         getBindingLabel(leftClickBinding),
         getBindingLabel(rightClickBinding),
         getBindingLabel(middleClickBinding),
@@ -985,7 +1513,8 @@ void drawAMMenu() {
 }
 
 void refreshAMUI(const Keyboard_Class::KeysState* keyState = nullptr) {
-    if (amMacroMode) drawAMMacroUI();
+    if (amKeyboardLayout == AM_LAYOUT_NONE) drawAMLayoutSetup();
+    else if (amMacroMode) drawAMMacroUI();
     else if (amInMenu) drawAMMenu();
     else drawAMMainUI(keyState);
 }
@@ -1002,6 +1531,10 @@ void updateMenuSetting(int direction) {
             break;
         case AM_MENU_INVERT_Y:
             invertAxisY = !invertAxisY;
+            amSettingsChanged = true;
+            break;
+        case AM_MENU_LAYOUT:
+            amKeyboardLayout = cycleLayout(amKeyboardLayout, direction);
             amSettingsChanged = true;
             break;
         case AM_MENU_LEFT_CLICK:
@@ -1191,7 +1724,18 @@ void updateMacroPlayback(unsigned long now) {
     if (amMacroPlaybackMillis != 0 && (now - amMacroPlaybackMillis) < AM_MACRO_PLAYBACK_STEP_MS) return;
 
     const AMMacroStep& step = steps[amMacroPlaybackIndex++];
-    bleCombo.sendKeyboardReport(step.modifiers, step.keys, getMacroStepKeyCount(step));
+    if (stepRequiresSequence(step)) {
+        playTranslatedSequence(step);
+    } else {
+        uint8_t modifiers = 0;
+        uint8_t keys[6] = {0};
+        size_t keyCount = 0;
+        if (buildTranslatedKeyboardReport(step, modifiers, keys, keyCount)) {
+            bleCombo.sendKeyboardReport(modifiers, keys, keyCount);
+        } else {
+            bleCombo.releaseKeyboard();
+        }
+    }
     amMacroPlaybackMillis = now;
 }
 
@@ -1407,18 +1951,68 @@ void toggleControlMode(const Keyboard_Class::KeysState& keyState) {
     amControlMode = (amControlMode == AM_MODE_MOUSE) ? AM_MODE_KEYBOARD : AM_MODE_MOUSE;
     amShowMouseHelp = false;
     amLastKeyboardPreview = "";
+    amHasLastKeyboardStep = false;
     refreshAMUI(amControlMode == AM_MODE_KEYBOARD ? &keyState : nullptr);
 }
 
-void handleKeyboardMode(const Keyboard_Class::KeysState& keyState) {
-    uint8_t keys[6] = {0};
-    size_t keyCount = 0;
+void confirmKeyboardLayoutSelection() {
+    amKeyboardLayout = getLayoutFromSelectionIndex(amLayoutSelectionIndex);
+    saveAMSettings();
+    amSettingsChanged = false;
+    amLastKeyboardPreview = "";
+    amLastKeyboardHintVisible = false;
+    amHasLastKeyboardStep = false;
+    clearExitArm();
+    releaseAllAMButtons();
+    refreshAMUI();
+}
 
-    for (uint8_t hidKey : keyState.hid_keys) {
-        if (keyCount < 6) keys[keyCount++] = remapFnArrowKey(keyState, hidKey);
+void handleLayoutSetup(unsigned long now) {
+    if (now - amLastKeyPress <= 180) return;
+
+    if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+        amLayoutSelectionIndex = (amLayoutSelectionIndex + AM_LAYOUT_OPTION_COUNT - 1) % AM_LAYOUT_OPTION_COUNT;
+        refreshAMUI();
+        amLastKeyPress = now;
+        return;
     }
 
-    bleCombo.sendKeyboardReport(keyState.modifiers, keys, keyCount);
+    if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+        amLayoutSelectionIndex = (amLayoutSelectionIndex + 1) % AM_LAYOUT_OPTION_COUNT;
+        refreshAMUI();
+        amLastKeyPress = now;
+        return;
+    }
+
+    if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER) || M5.BtnA.isPressed()) {
+        confirmKeyboardLayoutSelection();
+        amLastKeyPress = now;
+    }
+}
+
+void handleKeyboardMode(const Keyboard_Class::KeysState& keyState) {
+    const AMMacroStep currentStep = buildMacroStep(keyState);
+    const bool changed = !amHasLastKeyboardStep || !macroStepEquals(currentStep, amLastKeyboardStep);
+
+    if (changed) {
+        amLastKeyboardStep = currentStep;
+        amHasLastKeyboardStep = true;
+
+        if (isMacroStepEmpty(currentStep)) {
+            bleCombo.releaseKeyboard();
+        } else if (stepRequiresSequence(currentStep)) {
+            playTranslatedSequence(currentStep);
+        } else {
+            uint8_t modifiers = 0;
+            uint8_t keys[6] = {0};
+            size_t keyCount = 0;
+            if (buildTranslatedKeyboardReport(currentStep, modifiers, keys, keyCount)) {
+                bleCombo.sendKeyboardReport(modifiers, keys, keyCount);
+            } else {
+                bleCombo.releaseKeyboard();
+            }
+        }
+    }
 
     if (M5Cardputer.Keyboard.isChange()) {
         const String preview = getPreviewText(keyState);
@@ -1558,11 +2152,13 @@ void airMouseResetUI() {
     amMacroStatusUntil = 0;
     resetMacroRecordingBuffers();
     clearMacroInputTracking();
+    amHasLastKeyboardStep = false;
     amWasConnected = bleCombo.isConnected();
     amDelWasPressed = false;
     clearExitArm();
     fractionX = 0.0f;
     fractionY = 0.0f;
+    amLayoutSelectionIndex = getLayoutSelectionIndex(amKeyboardLayout);
     amLastKeyboardPreview = "";
     amLastKeyboardHintVisible = false;
     releaseAllAMButtons();
@@ -1574,6 +2170,12 @@ void airMouseResetUI() {
 void airMouseLoop() {
     const Keyboard_Class::KeysState& keyState = M5Cardputer.Keyboard.keysState();
     const unsigned long now = millis();
+
+    if (amKeyboardLayout == AM_LAYOUT_NONE) {
+        handleLayoutSetup(now);
+        if (M5.BtnA.wasReleased()) amBtnALongHandled = false;
+        return;
+    }
 
     refreshExpiredMacroStatus(keyState, now);
 
@@ -1621,4 +2223,8 @@ void airMouseLoop() {
     }
 
     handleMouseMode(keyState, now);
+}
+
+bool airMouseBlocksExit() {
+    return amKeyboardLayout == AM_LAYOUT_NONE;
 }

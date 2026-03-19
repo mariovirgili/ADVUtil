@@ -5,5 +5,6 @@
 void airMouseInit();
 void airMouseResetUI();
 void airMouseLoop();
+bool airMouseBlocksExit();
 
 #endif

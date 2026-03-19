@@ -136,7 +136,8 @@ void loop() {
             if (redraw) drawMenu();
         }
     } else {
-        if (M5Cardputer.Keyboard.isKeyPressed('q') || returnToMenu) {
+        const bool wantsQuit = currentState == STATE_GPS_INFO && M5Cardputer.Keyboard.isKeyPressed('q');
+        if (wantsQuit || returnToMenu) {
             if (currentState == STATE_GPS_INFO) gpsInfoTeardown();
             currentState = STATE_MENU;
             returnToMenu = false;
