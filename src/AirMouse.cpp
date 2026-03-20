@@ -137,6 +137,7 @@ int amMacroSelectedSlot = -1;
 int amMacroPlaybackSlot = -1;
 size_t amMacroPlaybackIndex = 0;
 unsigned long amMacroPlaybackMillis = 0;
+unsigned long amMacroPlaybackStepMs = 70;
 unsigned long amMacroStatusUntil = 0;
 String amMacroStatusMessage = "";
 String amMacroRecordingPreview = "";
@@ -152,7 +153,10 @@ AMMacroSlot amMacroSlots[10];
 constexpr unsigned long AM_EXIT_DOUBLE_TAP_MS = 550;
 constexpr unsigned long AM_MACRO_HOLD_MS = 2000;
 constexpr unsigned long AM_MACRO_STATUS_MS = 2000;
-constexpr unsigned long AM_MACRO_PLAYBACK_STEP_MS = 70;
+constexpr unsigned long AM_MACRO_PLAYBACK_STEP_DEFAULT_MS = 70;
+constexpr unsigned long AM_MACRO_PLAYBACK_STEP_MIN_MS = 20;
+constexpr unsigned long AM_MACRO_PLAYBACK_STEP_MAX_MS = 250;
+constexpr unsigned long AM_MACRO_PLAYBACK_STEP_DELTA_MS = 10;
 constexpr size_t AM_MACRO_SLOT_COUNT = 10;
 constexpr size_t AM_MACRO_MAX_STEPS = 120;
 constexpr uint8_t AM_HID_RIGHT_ARROW = 0x4F;
@@ -558,6 +562,12 @@ void clearMacroSlot(int slot) {
     amMacroSlots[slot].steps.clear();
 }
 
+unsigned long clampMacroPlaybackStep(long value) {
+    if (value < static_cast<long>(AM_MACRO_PLAYBACK_STEP_MIN_MS)) return AM_MACRO_PLAYBACK_STEP_MIN_MS;
+    if (value > static_cast<long>(AM_MACRO_PLAYBACK_STEP_MAX_MS)) return AM_MACRO_PLAYBACK_STEP_MAX_MS;
+    return static_cast<unsigned long>(value);
+}
+
 char toHexDigit(uint8_t value) {
     return value < 10 ? static_cast<char>('0' + value) : static_cast<char>('A' + (value - 10));
 }
@@ -689,6 +699,7 @@ bool decodeMacroSteps(const String& text, std::vector<AMMacroStep>& steps) {
 }
 
 void loadAMMacros() {
+    amMacroPlaybackStepMs = AM_MACRO_PLAYBACK_STEP_DEFAULT_MS;
     for (size_t i = 0; i < AM_MACRO_SLOT_COUNT; ++i) {
         clearMacroSlot(static_cast<int>(i));
     }
@@ -710,6 +721,12 @@ void loadAMMacros() {
         String value = line.substring(separator + 1);
         key.trim();
         value.trim();
+
+        if (key.equalsIgnoreCase("playback_step_ms")) {
+            const long parsedStep = value.toInt();
+            if (parsedStep > 0) amMacroPlaybackStepMs = clampMacroPlaybackStep(parsedStep);
+            continue;
+        }
 
         if (!key.startsWith("macro_")) continue;
 
@@ -737,6 +754,8 @@ void saveAMMacros() {
 
     File file = SD.open(amMacroConfigPath, FILE_WRITE);
     if (!file) return;
+
+    writeConfigLine(file, "playback_step_ms", String(amMacroPlaybackStepMs));
 
     for (size_t i = 0; i < AM_MACRO_SLOT_COUNT; ++i) {
         if (amMacroSlots[i].preview.length() == 0 && amMacroSlots[i].steps.empty()) continue;
@@ -1289,11 +1308,13 @@ void drawAMMacroHome() {
     M5.Display.setCursor(20, 96);
     M5.Display.println("R record/replace   L list macros");
     M5.Display.setCursor(20, 106);
-    M5.Display.println("Hold BtnA to return");
+    M5.Display.printf("Playback %lums   ;/. change", amMacroPlaybackStepMs);
 
     const bool showStatus = hasMacroStatus(millis());
     if (showStatus) {
         drawAMFooter(amMacroStatusMessage, "", TFT_YELLOW);
+    } else {
+        drawAMFooter("Macro config ready", "Hold BtnA return", M5.Display.color565(220, 245, 255));
     }
 }
 
@@ -1365,8 +1386,9 @@ void drawAMMacroList() {
 
 void drawAMMacroPlayback() {
     const String title = String("Playing Slot ") + getMacroSlotLabel(amMacroPlaybackSlot);
+    const String subtitle = String("Sending the saved key sequence at ") + amMacroPlaybackStepMs + "ms";
     drawAMBackground();
-    drawAMHeader(title.c_str(), "Sending the saved key sequence");
+    drawAMHeader(title.c_str(), subtitle.c_str());
 
     drawAMCard(10, 40, 220, 58, false);
     drawAMCardTitle(20, 47, "Content", false);
@@ -1669,6 +1691,24 @@ void openMacroList(const Keyboard_Class::KeysState& keyState) {
     refreshAMUI();
 }
 
+void adjustMacroPlaybackStep(int direction, unsigned long now) {
+    const long nextValue = constrain(static_cast<long>(amMacroPlaybackStepMs)
+                                     + (direction * static_cast<long>(AM_MACRO_PLAYBACK_STEP_DELTA_MS)),
+                                     static_cast<long>(AM_MACRO_PLAYBACK_STEP_MIN_MS),
+                                     static_cast<long>(AM_MACRO_PLAYBACK_STEP_MAX_MS));
+    const unsigned long nextStepMs = static_cast<unsigned long>(nextValue);
+    if (nextStepMs == amMacroPlaybackStepMs) {
+        setMacroStatus(String("Playback min/max ") + amMacroPlaybackStepMs + "ms", now, 1400);
+        refreshAMUI();
+        return;
+    }
+
+    amMacroPlaybackStepMs = nextStepMs;
+    saveAMMacros();
+    setMacroStatus(String("Playback ") + amMacroPlaybackStepMs + "ms", now, 1400);
+    refreshAMUI();
+}
+
 void startMacroPlayback(int slot, unsigned long now) {
     if (!bleCombo.isConnected()) {
         setMacroStatus("BLE keyboard not connected", now);
@@ -1721,7 +1761,7 @@ void updateMacroPlayback(unsigned long now) {
         return;
     }
 
-    if (amMacroPlaybackMillis != 0 && (now - amMacroPlaybackMillis) < AM_MACRO_PLAYBACK_STEP_MS) return;
+    if (amMacroPlaybackMillis != 0 && (now - amMacroPlaybackMillis) < amMacroPlaybackStepMs) return;
 
     const AMMacroStep& step = steps[amMacroPlaybackIndex++];
     if (stepRequiresSequence(step)) {
@@ -1763,6 +1803,16 @@ void handleMacroMode(const Keyboard_Class::KeysState& keyState, unsigned long no
     amMacroHasLastInputStep = true;
 
     if (amMacroView == AM_MACRO_VIEW_HOME) {
+        if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+            adjustMacroPlaybackStep(-1, now);
+            return;
+        }
+
+        if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+            adjustMacroPlaybackStep(1, now);
+            return;
+        }
+
         const int slot = getPressedMacroSlot(keyState);
         if (slot >= 0) {
             startMacroPlayback(slot, now);

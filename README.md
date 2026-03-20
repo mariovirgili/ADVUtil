@@ -21,6 +21,7 @@ Adjustable sensitivity
 Settings saved to SD card
 Keyboard mode
 Macro mode
+Configurable macro playback speed
 International keyboard layouts
 
 - BLE Gamepad
