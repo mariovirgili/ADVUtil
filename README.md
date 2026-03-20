@@ -1,12 +1,15 @@
 # ADVUtil
-AirMouse and GPS integrated
+Air Mouse, Keyboard, Gamepad and GPS integrated
 
 ![](media/Title.jpg)![](media/Mousemenu.jpg)![](media/Keyboard.jpg)![](media/GPS1.jpg)![](media/GPS2.jpg)
 
-ADVUtil for Cardputer: Air Mouse BLE + GPS Info utility with maps, satellite views, trip stats and more
+ADVUtil for Cardputer: Air Mouse BLE, Keyboard, Gamepad and GPS utility with maps, satellite views, trip stats and more
+ADVUtil now includes Air Mouse/Kbd, BLE Gamepad and GPS Info.
 I’ve been working on ADVUtil, a utility app for the M5Stack Cardputer with two main tools built in:
 
-- Air Mouse BLE Turn the Cardputer into a Bluetooth air mouse using the IMU.
+- Air Mouse / Keyboard BLE
+
+Turn the Cardputer into a Bluetooth air mouse and keyboard combo using the IMU and integrated keyboard.
 
 Main features:
 
@@ -15,6 +18,23 @@ Left click with Enter
 Right click with Space
 IMU calibration directly from the device
 Adjustable sensitivity
+Settings saved to SD card
+Keyboard mode
+Macro mode
+International keyboard layouts
+
+- BLE Gamepad
+
+Turn the Cardputer into a Bluetooth gamepad for Windows and other hosts that support standard BLE HID gamepads.
+
+Main features:
+
+Twin Stick and Southpaw profiles
+Cardputer-friendly default layout with ASDE and JKLO
+8 configurable buttons
+D-pad on ; , . /
+Optional motion movement using the IMU
+Motion sensitivity and X/Y inversion
 Settings saved to SD card
 
 - GPS Info
@@ -118,3 +138,23 @@ V0.5 changelog:
 Recommended after updating:
 
 - If you recorded macros on older builds, re-recording them is recommended for best compatibility with the new layout-aware macro system
+
+__________________________________
+
+V0.6 changelog:
+
+- Added a new BLE Gamepad mode in the main menu
+- Added a dedicated Gamepad UI with status, help and settings screens
+- Added Twin Stick and Southpaw gamepad profiles
+- Added Cardputer-oriented default controls: ASDE for movement and JKLO for aim
+- Added configurable bindings for A, B, X, Y, L1, R1, Back and Start
+- Added optional motion movement using the IMU for the left stick
+- Added motion calibration, sensitivity control and X/Y axis inversion
+- Added persistent Gamepad settings saved in `/ADVUtil/gamepad.cfg`
+- Updated the main menu version to v0.6
+- Reduced Gamepad UI flicker by rendering through an off-screen canvas
+
+Notes:
+
+- Air Mouse/Kbd and Gamepad should currently be treated as separate boot-time HID modes. If one is already initialized, reboot before switching to the other.
+- All Air Mouse, Keyboard, Macro and GPS features from previous releases remain available in v0.6
