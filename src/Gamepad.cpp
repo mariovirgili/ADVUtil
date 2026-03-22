@@ -1,5 +1,7 @@
 #include "Gamepad.h"
 
+#include "DisplayBrightness.h"
+
 #include <M5Cardputer.h>
 #include <SD.h>
 #include <BleGamepad.h>
@@ -54,6 +56,7 @@ enum GPMenuItem : uint8_t {
     GP_MENU_MOTION_SENS,
     GP_MENU_INVERT_X,
     GP_MENU_INVERT_Y,
+    GP_MENU_BRIGHTNESS,
     GP_MENU_A_BUTTON,
     GP_MENU_B_BUTTON,
     GP_MENU_X_BUTTON,
@@ -84,6 +87,8 @@ bool gpExitArmed = false;
 bool gpBleStarted = false;
 bool gpHasLastReport = false;
 bool gpImuReady = false;
+bool gpBrightnessMuted = false;
+bool gpBrightnessShortcutPressed = false;
 int gpMenuIndex = 0;
 unsigned long gpLastKeyPress = 0;
 unsigned long gpExitArmMillis = 0;
@@ -91,6 +96,7 @@ unsigned long gpModeStartMillis = 0;
 
 GPProfile gpProfile = GP_PROFILE_TWIN_STICK;
 GPMoveInput gpMoveInput = GP_MOVE_KEYS;
+uint8_t gpBrightnessLevel = kDisplayBrightnessDefaultLevel;
 GPBindingKey gpABinding = GP_BIND_ENTER;
 GPBindingKey gpBBinding = GP_BIND_SPACE;
 GPBindingKey gpXBinding = GP_BIND_Z;
@@ -169,6 +175,10 @@ void drawGPFooter(const String& leftText, const String& rightText, uint16_t colo
     const int rightX = gpCanvas->width() - (rightText.length() * 6) - 12;
     gpCanvas->setCursor(rightX, 122);
     gpCanvas->print(rightText);
+}
+
+void syncGPDisplayBrightness() {
+    applyDisplayBrightnessLevel(gpBrightnessMuted ? 0 : gpBrightnessLevel);
 }
 
 const char* getGPProfileLabel(GPProfile profile) {
@@ -325,6 +335,8 @@ void loadGPDefaults() {
     gpMotionSensitivity = 1.0f;
     gpInvertMotionX = false;
     gpInvertMotionY = true;
+    gpBrightnessLevel = kDisplayBrightnessDefaultLevel;
+    gpBrightnessMuted = false;
     gpABinding = GP_BIND_ENTER;
     gpBBinding = GP_BIND_SPACE;
     gpXBinding = GP_BIND_Z;
@@ -371,6 +383,8 @@ void applyGPConfigLine(const String& rawLine) {
         gpInvertMotionX = parseGPBool(value, gpInvertMotionX);
     } else if (key.equalsIgnoreCase("invert_motion_y")) {
         gpInvertMotionY = parseGPBool(value, gpInvertMotionY);
+    } else if (key.equalsIgnoreCase("brightness")) {
+        gpBrightnessLevel = clampDisplayBrightnessLevel(value.toInt());
     } else if (key.equalsIgnoreCase("button_a")) {
         gpABinding = parseGPBinding(value);
     } else if (key.equalsIgnoreCase("button_b")) {
@@ -393,15 +407,23 @@ void applyGPConfigLine(const String& rawLine) {
 void loadGPSettings() {
     loadGPDefaults();
 
-    if (!sdAvailable || !SD.exists(kGamepadConfigPath)) return;
+    if (!sdAvailable || !SD.exists(kGamepadConfigPath)) {
+        syncGPDisplayBrightness();
+        return;
+    }
 
     File file = SD.open(kGamepadConfigPath, FILE_READ);
-    if (!file) return;
+    if (!file) {
+        syncGPDisplayBrightness();
+        return;
+    }
 
     while (file.available()) {
         applyGPConfigLine(file.readStringUntil('\n'));
     }
     file.close();
+
+    syncGPDisplayBrightness();
 }
 
 void saveGPSettings() {
@@ -417,6 +439,7 @@ void saveGPSettings() {
     writeGPConfigLine(file, "motion_sens", String(gpMotionSensitivity, 1));
     writeGPConfigLine(file, "invert_motion_x", gpInvertMotionX ? "true" : "false");
     writeGPConfigLine(file, "invert_motion_y", gpInvertMotionY ? "true" : "false");
+    writeGPConfigLine(file, "brightness", String(static_cast<int>(gpBrightnessLevel)));
     writeGPConfigLine(file, "button_a", getGPBindingLabel(gpABinding));
     writeGPConfigLine(file, "button_b", getGPBindingLabel(gpBBinding));
     writeGPConfigLine(file, "button_x", getGPBindingLabel(gpXBinding));
@@ -776,6 +799,7 @@ void drawGPMenu() {
         "Motion Sens",
         "Invert X",
         "Invert Y",
+        "Brightness",
         "A Button",
         "B Button",
         "X Button",
@@ -793,6 +817,7 @@ void drawGPMenu() {
         String(gpMotionSensitivity, 1),
         String(getGPOnOffLabel(gpInvertMotionX)),
         String(getGPOnOffLabel(gpInvertMotionY)),
+        String(static_cast<int>(gpBrightnessLevel)),
         String(getGPBindingLabel(gpABinding)),
         String(getGPBindingLabel(gpBBinding)),
         String(getGPBindingLabel(gpXBinding)),
@@ -848,6 +873,11 @@ void updateGPMenuSetting(int direction) {
             gpInvertMotionY = !gpInvertMotionY;
             gpSettingsChanged = true;
             break;
+        case GP_MENU_BRIGHTNESS:
+            gpBrightnessLevel = clampDisplayBrightnessLevel(static_cast<int>(gpBrightnessLevel) + direction);
+            gpSettingsChanged = true;
+            syncGPDisplayBrightness();
+            break;
         case GP_MENU_A_BUTTON:
             gpABinding = cycleGPBinding(gpABinding, direction);
             gpSettingsChanged = true;
@@ -895,6 +925,26 @@ void closeGPMenu() {
     refreshGPUI();
 }
 
+bool handleGPBrightnessShortcut(const Keyboard_Class::KeysState& keyState) {
+    const bool comboPressed = keyState.ctrl && keyState.del;
+    const bool comboEdge = comboPressed && !gpBrightnessShortcutPressed;
+    gpBrightnessShortcutPressed = comboPressed;
+
+    if (!comboPressed) return false;
+
+    gpDelWasPressed = keyState.del;
+    clearGPExitArm();
+
+    if (comboEdge) {
+        gpBrightnessMuted = !gpBrightnessMuted;
+        syncGPDisplayBrightness();
+        sendNeutralGPReport();
+        refreshGPUI();
+    }
+
+    return true;
+}
+
 bool handleGPExitGesture(const Keyboard_Class::KeysState& keyState, unsigned long now) {
     const bool delPressed = keyState.del;
     const bool delEdge = delPressed && !gpDelWasPressed;
@@ -904,6 +954,8 @@ bool handleGPExitGesture(const Keyboard_Class::KeysState& keyState, unsigned lon
 
     if (gpExitArmed && (now - gpExitArmMillis) <= GP_EXIT_DOUBLE_TAP_MS) {
         clearGPExitArm();
+        gpBrightnessMuted = false;
+        syncGPDisplayBrightness();
         sendNeutralGPReport();
         returnToMenu = true;
         return true;
@@ -1013,6 +1065,7 @@ void gamepadResetUI() {
     gpMenuIndex = 0;
     gpLastKeyPress = 0;
     gpDelWasPressed = false;
+    gpBrightnessShortcutPressed = false;
     clearGPExitArm();
     gpModeStartMillis = millis();
     gpWasConnected = false;
@@ -1039,6 +1092,8 @@ void gamepadLoop() {
     }
 
     flushGPExitHint(now);
+
+    if (handleGPBrightnessShortcut(keyState)) return;
 
     if (handleGPExitGesture(keyState, now)) return;
 

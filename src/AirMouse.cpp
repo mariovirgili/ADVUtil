@@ -1,6 +1,7 @@
 #include "AirMouse.h"
 
 #include "BleComboHID.h"
+#include "DisplayBrightness.h"
 
 #include <M5Cardputer.h>
 #include <SD.h>
@@ -25,6 +26,8 @@ float fractionY = 0.0f;
 float sensitivity = 0.15f;
 bool invertAxisX = false;
 bool invertAxisY = true;
+uint8_t amBrightnessLevel = kDisplayBrightnessDefaultLevel;
+bool amBrightnessMuted = false;
 
 enum AMBindingKey : uint8_t {
     AM_BIND_NONE = 0,
@@ -61,6 +64,7 @@ enum AMMenuItem : int {
     AM_MENU_INVERT_X,
     AM_MENU_INVERT_Y,
     AM_MENU_LAYOUT,
+    AM_MENU_BRIGHTNESS,
     AM_MENU_LEFT_CLICK,
     AM_MENU_RIGHT_CLICK,
     AM_MENU_MIDDLE_CLICK,
@@ -132,6 +136,7 @@ bool amLastKeyboardHintVisible = false;
 bool amShowMouseHelp = false;
 bool amMacroMode = false;
 bool amBtnALongHandled = false;
+bool amBrightnessShortcutPressed = false;
 int amMacroListScroll = 0;
 int amMacroSelectedSlot = -1;
 int amMacroPlaybackSlot = -1;
@@ -449,6 +454,10 @@ void writeConfigLine(File& file, const String& key, const String& value) {
     file.println(value);
 }
 
+void syncAMDisplayBrightness() {
+    applyDisplayBrightnessLevel(amBrightnessMuted ? 0 : amBrightnessLevel);
+}
+
 void applyConfigLine(const String& rawLine) {
     String line = rawLine;
     line.trim();
@@ -475,6 +484,8 @@ void applyConfigLine(const String& rawLine) {
         invertAxisY = value.toInt() != 0;
     } else if (key.equalsIgnoreCase("layout")) {
         amKeyboardLayout = parseLayoutLabel(value);
+    } else if (key.equalsIgnoreCase("brightness")) {
+        amBrightnessLevel = clampDisplayBrightnessLevel(value.toInt());
     } else if (key.equalsIgnoreCase("left_click")) {
         leftClickBinding = parseBindingLabel(value);
     } else if (key.equalsIgnoreCase("right_click")) {
@@ -493,6 +504,8 @@ void loadAMSettings() {
     invertAxisX = false;
     invertAxisY = true;
     amKeyboardLayout = AM_LAYOUT_NONE;
+    amBrightnessLevel = kDisplayBrightnessDefaultLevel;
+    amBrightnessMuted = false;
     leftClickBinding = AM_BIND_ENTER;
     rightClickBinding = AM_BIND_SPACE;
     middleClickBinding = AM_BIND_V;
@@ -508,6 +521,8 @@ void loadAMSettings() {
             file.close();
         }
     }
+
+    syncAMDisplayBrightness();
 }
 
 void saveAMSettings() {
@@ -521,6 +536,7 @@ void saveAMSettings() {
         writeConfigLine(file, "invert_x", invertAxisX ? "1" : "0");
         writeConfigLine(file, "invert_y", invertAxisY ? "1" : "0");
         writeConfigLine(file, "layout", getLayoutConfigValue(amKeyboardLayout));
+        writeConfigLine(file, "brightness", String(static_cast<int>(amBrightnessLevel)));
         writeConfigLine(file, "left_click", getBindingLabel(leftClickBinding));
         writeConfigLine(file, "right_click", getBindingLabel(rightClickBinding));
         writeConfigLine(file, "middle_click", getBindingLabel(middleClickBinding));
@@ -1500,6 +1516,7 @@ void drawAMMenu() {
         "Invert X",
         "Invert Y",
         "Layout",
+        "Brightness",
         "Left Click",
         "Right Click",
         "Middle Click",
@@ -1513,6 +1530,7 @@ void drawAMMenu() {
         invertAxisX ? "On" : "Off",
         invertAxisY ? "On" : "Off",
         getLayoutLabel(amKeyboardLayout),
+        String(static_cast<int>(amBrightnessLevel)),
         getBindingLabel(leftClickBinding),
         getBindingLabel(rightClickBinding),
         getBindingLabel(middleClickBinding),
@@ -1558,6 +1576,11 @@ void updateMenuSetting(int direction) {
         case AM_MENU_LAYOUT:
             amKeyboardLayout = cycleLayout(amKeyboardLayout, direction);
             amSettingsChanged = true;
+            break;
+        case AM_MENU_BRIGHTNESS:
+            amBrightnessLevel = clampDisplayBrightnessLevel(static_cast<int>(amBrightnessLevel) + direction);
+            amSettingsChanged = true;
+            syncAMDisplayBrightness();
             break;
         case AM_MENU_LEFT_CLICK:
             leftClickBinding = cycleBinding(leftClickBinding, direction);
@@ -1948,10 +1971,33 @@ void exitAirMouse() {
         saveAMSettings();
         amSettingsChanged = false;
     }
+    amBrightnessMuted = false;
+    syncAMDisplayBrightness();
     amInMenu = false;
     clearExitArm();
     releaseAllAMButtons();
     returnToMenu = true;
+}
+
+bool handleAMBrightnessShortcut(const Keyboard_Class::KeysState& keyState) {
+    const bool comboPressed = keyState.ctrl && keyState.del;
+    const bool comboEdge = comboPressed && !amBrightnessShortcutPressed;
+    amBrightnessShortcutPressed = comboPressed;
+
+    if (!comboPressed) return false;
+
+    amDelWasPressed = keyState.del;
+    clearExitArm();
+
+    if (comboEdge) {
+        amBrightnessMuted = !amBrightnessMuted;
+        syncAMDisplayBrightness();
+        releaseAllAMButtons();
+        amHasLastKeyboardStep = false;
+        refreshAMUI(amControlMode == AM_MODE_KEYBOARD ? &keyState : nullptr);
+    }
+
+    return true;
 }
 
 bool handleExitGesture(const Keyboard_Class::KeysState& keyState, unsigned long now) {
@@ -2205,6 +2251,7 @@ void airMouseResetUI() {
     amHasLastKeyboardStep = false;
     amWasConnected = bleCombo.isConnected();
     amDelWasPressed = false;
+    amBrightnessShortcutPressed = false;
     clearExitArm();
     fractionX = 0.0f;
     fractionY = 0.0f;
@@ -2220,6 +2267,11 @@ void airMouseResetUI() {
 void airMouseLoop() {
     const Keyboard_Class::KeysState& keyState = M5Cardputer.Keyboard.keysState();
     const unsigned long now = millis();
+
+    if (handleAMBrightnessShortcut(keyState)) {
+        if (M5.BtnA.wasReleased()) amBtnALongHandled = false;
+        return;
+    }
 
     if (amKeyboardLayout == AM_LAYOUT_NONE) {
         handleLayoutSetup(now);
